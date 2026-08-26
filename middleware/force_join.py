@@ -1,10 +1,44 @@
 #!/usr/bin/env python3
-"""Force Channel Join Middleware"""
+"""Force Channel Join Middleware with High-Speed Membership Caching"""
 
+import time
 from functools import wraps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from config import ADMIN_IDS
+from config import ADMIN_IDS, CHANNEL_CACHE_TTL
+from utils.keyboard import force_join_keyboard
+
+# In-memory cache for channel membership to handle 100+ concurrent users smoothly
+# Structure: { (user_id, channel_id): (is_member: bool, timestamp: float) }
+MEMBERSHIP_CACHE = {}
+
+
+async def is_user_channel_member(bot, channel_id: int, user_id: int) -> bool:
+    """Check if user is a member of channel, using TTL cache."""
+    now = time.time()
+    cache_key = (user_id, channel_id)
+
+    if cache_key in MEMBERSHIP_CACHE:
+        is_member, cached_at = MEMBERSHIP_CACHE[cache_key]
+        if now - cached_at < CHANNEL_CACHE_TTL:
+            return is_member
+
+    try:
+        member = await bot.get_chat_member(channel_id, user_id)
+        is_member = member.status not in ["left", "kicked"]
+        MEMBERSHIP_CACHE[cache_key] = (is_member, now)
+        return is_member
+    except Exception:
+        # If API fails or channel issue, assume not joined
+        MEMBERSHIP_CACHE[cache_key] = (False, now)
+        return False
+
+
+def clear_user_membership_cache(user_id: int):
+    """Force purge cache for a user when they click Verify."""
+    keys_to_del = [k for k in MEMBERSHIP_CACHE if k[0] == user_id]
+    for k in keys_to_del:
+        MEMBERSHIP_CACHE.pop(k, None)
 
 
 def require_join(func):
@@ -28,21 +62,21 @@ def require_join(func):
 
         # Check ban
         if await db.is_banned(user_id):
-            text = "🚫 You have been banned from using this bot."
+            text = "🚫 *ACCESS DENIED*\n\nYou have been banned from MoneyZone Bot."
             if update.callback_query:
                 await update.callback_query.answer(text, show_alert=True)
             elif update.message:
-                await update.message.reply_text(text)
+                await update.message.reply_text(text, parse_mode="Markdown")
             return
 
         # Check maintenance mode
         maintenance = await db.get_setting("maintenance_mode", "0")
         if maintenance == "1":
-            text = "🔧 Bot is under maintenance. Please try again later."
+            text = "🔧 *MONEYZONE SYSTEM MAINTENANCE*\n\nBot is currently undergoing system upgrades. Please check back shortly!"
             if update.callback_query:
                 await update.callback_query.answer(text, show_alert=True)
             elif update.message:
-                await update.message.reply_text(text)
+                await update.message.reply_text(text, parse_mode="Markdown")
             return
 
         # Check force join channels
@@ -50,39 +84,32 @@ def require_join(func):
         if channels:
             not_joined = []
             joined_ids = set()
+
             for ch in channels:
-                try:
-                    member = await context.bot.get_chat_member(ch["channel_id"], user_id)
-                    if member.status in ["left", "kicked"]:
-                        not_joined.append(ch)
-                    else:
-                        joined_ids.add(ch["channel_id"])
-                except Exception:
+                joined = await is_user_channel_member(context.bot, ch["channel_id"], user_id)
+                if joined:
+                    joined_ids.add(ch["channel_id"])
+                else:
                     not_joined.append(ch)
 
             if not_joined:
-                buttons = []
-                for ch in channels:
-                    ch_id = ch["channel_id"]
-                    title = ch.get("channel_title") or "Channel"
-                    link = ch.get("invite_link")
-                    if not link and ch.get("channel_username"):
-                        link = f"https://t.me/{ch['channel_username'].lstrip('@')}"
-                    if not link:
-                        continue
-                    icon = "✅" if ch_id in joined_ids else "📢"
-                    buttons.append([InlineKeyboardButton(f"{icon} {title}", url=link)])
-                buttons.append([InlineKeyboardButton("✅ Verify", callback_data="verify_channels")])
-                markup = InlineKeyboardMarkup(buttons)
-
+                markup = force_join_keyboard(channels, joined_ids)
                 text = (
-                    "⚠️ *You must join all channels to use this bot!*\n\n"
-                    "Join the channels below, then click ✅ Verify:"
+                    "⚡ 💸 *MONEYZONE MEMBER VERIFICATION* 💸 ⚡\n"
+                    "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+                    "⚠️ *Access Restricted!*\n"
+                    "You must join all our official sponsor channels to unlock Lenskart Voucher claims and rewards.\n\n"
+                    "📌 *Status Legend:*\n"
+                    "🟢 `JOINED`  |  🔴 `ACTION REQUIRED`\n\n"
+                    "👇 *Join the channels below, then tap ✅ VERIFY ACCESS NOW:*"
                 )
                 if update.callback_query:
-                    await update.callback_query.edit_message_text(
-                        text, reply_markup=markup, parse_mode="Markdown"
-                    )
+                    try:
+                        await update.callback_query.edit_message_text(
+                            text, reply_markup=markup, parse_mode="Markdown"
+                        )
+                    except Exception:
+                        pass
                 elif update.message:
                     await update.message.reply_text(
                         text, reply_markup=markup, parse_mode="Markdown"

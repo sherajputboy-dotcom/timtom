@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""User menu handlers — profile, referrals, vouchers, leaderboard, help"""
+"""User menu handlers — MoneyZone Profile, Referrals, Vouchers, Leaderboard, Help"""
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -34,7 +34,12 @@ async def show_main_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Show main menu via edit_message."""
     query = update.callback_query
     user = update.effective_user
-    text = f"👋 *Welcome back, {user.first_name or 'there'}!* 🚀\n\nChoose an option:"
+    text = (
+        f"⚡ 💸 *MONEYZONE DASHBOARD* 💸 ⚡\n"
+        f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+        f"👑 *Welcome back, {user.first_name or 'VIP User'}!* 🚀\n\n"
+        "Choose an option from the menu below:"
+    )
     await query.edit_message_text(
         text, reply_markup=main_menu_keyboard(), parse_mode="Markdown"
     )
@@ -48,22 +53,23 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = await db.get_user(user.id)
 
     if not data:
-        await query.edit_message_text("❌ Profile not found!")
+        await query.edit_message_text("❌ Profile record not found!")
         return
 
     vouchers = await db.get_user_vouchers(user.id)
     ref_link = f"https://t.me/{(await context.bot.get_me()).username}?start=ref_{user.id}"
 
     text = (
-        "👤 *Your Profile*\n\n"
-        f"🆔 ID: `{user.id}`\n"
-        f"👤 Name: `{data.get('first_name', 'N/A')} {data.get('last_name') or ''}`\n"
-        f"📛 Username: @{data.get('username') or 'N/A'}\n"
-        f"📅 Joined: `{format_datetime(data.get('joined_at'))}`\n"
-        f"🟢 Last Active: `{format_datetime(data.get('last_active'))}`\n\n"
-        f"👥 Referrals: `{format_number(data.get('referral_count', 0))}`\n"
-        f"🎫 Vouchers: `{len(vouchers)}`\n\n"
-        f"🔗 Your Referral Link:\n`{ref_link}`"
+        "📊 💸 *MONEYZONE ACCOUNT PROFILE* 💸 📊\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+        f"🆔 *User ID:* `{user.id}`\n"
+        f"👤 *Full Name:* `{data.get('first_name', 'VIP')} {data.get('last_name') or ''}`\n"
+        f"📛 *Username:* @{data.get('username') or 'N/A'}\n"
+        f"📅 *Joined Date:* `{format_datetime(data.get('joined_at'))}`\n"
+        f"🟢 *Last Active:* `{format_datetime(data.get('last_active'))}`\n\n"
+        f"🔥 *Total Referrals:* `{format_number(data.get('referral_count', 0))}`\n"
+        f"🎁 *Vouchers Claimed:* `{len(vouchers)}`\n\n"
+        f"🔗 *Your Referral Link:*\n`{ref_link}`"
     )
     await query.edit_message_text(
         text, reply_markup=back_button("main_menu"), parse_mode="Markdown"
@@ -82,20 +88,21 @@ async def show_referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ref_link = f"https://t.me/{bot_me.username}?start=ref_{user.id}"
 
     text = (
-        "👥 *Refer & Earn*\n\n"
-        "Share your referral link with friends!\n"
-        "When they join, you get credit! 🎉\n\n"
-        f"🔗 *Your Link:*\n`{ref_link}`\n\n"
-        f"📊 *Total Referrals:* `{format_number(count)}`\n"
+        "🔥 💸 *MONEYZONE REFER & EARN* 💸 🔥\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+        "Share your unique link with friends!\n"
+        "When they join, your referral score increases instantly! 🚀\n\n"
+        f"🔗 *YOUR EXCLUSIVE REFERRAL LINK:*\n`{ref_link}`\n\n"
+        f"📊 *TOTAL REFERRALS:* `{format_number(count)}` Users\n"
     )
 
     if referrals:
-        text += "\n👥 *Recent Referrals:*\n"
+        text += "\n👥 *RECENT REFERRALS:*\n"
         for i, ref in enumerate(referrals, 1):
             name = ref.get('first_name') or 'User'
             text += f"  {i}. {mention_user(ref['user_id'], name)} — `{format_datetime(ref.get('joined_at'))}`\n"
     else:
-        text += "\n😔 No referrals yet. Share your link!"
+        text += "\n😔 *No referrals yet.* Share your link on WhatsApp, Telegram & Instagram to climb the leaderboard!"
 
     await query.edit_message_text(
         text, reply_markup=back_button("main_menu"), parse_mode="Markdown"
@@ -112,14 +119,15 @@ async def show_vouchers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not vouchers:
         text = (
-            "🎫 *My Vouchers*\n\n"
-            "😔 You don't have any vouchers yet.\n"
-            "Use 🏃 Claim Reward to get one!"
+            "🎁 💸 *MONEYZONE VOUCHER VAULT* 💸 🎁\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+            "😔 *Your vault is empty!*\n"
+            "Tap *⚡ 🏃 CLAIM LENSKART REWARD* on the main menu to get your voucher now!"
         )
     else:
-        text = f"🎫 *My Vouchers* ({len(vouchers)})\n\n"
+        text = f"🎁 💸 *MONEYZONE VOUCHER VAULT* 💸 🎁 ({len(vouchers)})\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
         for i, v in enumerate(vouchers, 1):
-            text += f"{i}. 🎫 `{v.get('voucher_code', 'N/A')}`\n"
+            text += f"🎫 *Voucher #{i}:* `{v.get('voucher_code', 'N/A')}`\n"
             text += f"   📱 Phone: `{v.get('phone', 'N/A')}`\n"
             if v.get('tier'):
                 text += f"   🏆 Tier: `{v['tier']}`\n"
@@ -139,12 +147,12 @@ async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
 
     if not top:
-        text = "🏆 *Leaderboard*\n\n😔 No referrals yet. Be the first!"
+        text = "👑 💸 *MONEYZONE HALL OF FAME* 💸 👑\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n😔 No referrals yet. Be the first to reach #1!"
     else:
-        text = "🏆 *Top Referrers*\n\n"
+        text = "👑 💸 *MONEYZONE HALL OF FAME* 💸 👑\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
         for i, user_data in enumerate(top):
             medal = medals[i] if i < len(medals) else "🏅"
-            name = user_data.get('first_name') or 'User'
+            name = user_data.get('first_name') or 'MoneyZone Champ'
             count = user_data.get('referral_count', 0)
             text += f"{medal} {mention_user(user_data['user_id'], name)} — `{format_number(count)}` referrals\n"
 

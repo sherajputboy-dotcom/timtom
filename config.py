@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bot Configuration"""
+"""Bot Configuration — MoneyZone Edition"""
 
 import os
 import json
@@ -27,21 +27,26 @@ LENSKART_BASE_URL = "https://api-gateway.juno.lenskart.com"
 DEFAULT_STEPS = 30000
 DEFAULT_CAMPAIGN = "run-for-frame"
 
-# ============= MESSAGES =============
+# ============= MESSAGES & BRANDING =============
+BRAND_NAME = "💸 MONEYZONE REWARDS 💸"
+
 DEFAULT_WELCOME_MSG = (
-    "👋 *Welcome to {bot_name}!*\n\n"
-    "🏃 Claim your Lenskart rewards!\n"
-    "👥 Refer friends & earn!\n\n"
-    "📌 First, join our channels below, then click ✅ Verify."
+    "⚡ 💸 *WELCOME TO MONEYZONE OFFICIAL* 💸 ⚡\n"
+    "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+    "🔥 *Claim Premium Lenskart Gift Vouchers Instantly!*\n"
+    "👥 *Refer Friends & Multiply Your Earnings!*\n\n"
+    "📌 *Mandatory Requirement:*\n"
+    "To access our premium features, please join our official sponsor channels below, then click *✅ VERIFY ACCESS*."
 )
 
 DEFAULT_HELP_MSG = (
-    "ℹ️ *How to use this bot:*\n\n"
-    "1️⃣ Join all required channels\n"
-    "2️⃣ Click ✅ Verify\n"
-    "3️⃣ Access the main menu\n"
-    "4️⃣ Claim rewards or refer friends!\n\n"
-    "💬 Contact admin for support."
+    "👑 💸 *MONEYZONE SUPPORT & GUIDE* 💸 👑\n"
+    "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+    "🔹 *1. Join Channels:* Click the sponsor channel links & join.\n"
+    "🔹 *2. Click Verify:* Tap the *✅ VERIFY ACCESS* button.\n"
+    "🔹 *3. Claim Vouchers:* Tap *⚡ 🏃 CLAIM LENSKART VOUCHER*, enter your phone number & OTP.\n"
+    "🔹 *4. Refer & Earn:* Copy your unique referral link to build your team!\n\n"
+    "💬 *24/7 Admin Support Available!*"
 )
 
 # ============= REFERRAL =============
@@ -50,5 +55,6 @@ REFERRAL_PREFIX = "ref_"
 # ============= PAGINATION =============
 ITEMS_PER_PAGE = 10
 
-# ============= RATE LIMITS =============
+# ============= RATE LIMITS & CACHE =============
 BROADCAST_DELAY = 0.05  # seconds between messages during broadcast
+CHANNEL_CACHE_TTL = 45  # cache channel membership check for 45s for ultra-fast performance

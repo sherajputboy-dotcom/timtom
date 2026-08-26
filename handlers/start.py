@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Start handler — registration, referral tracking, force join check"""
+"""Start handler — registration, referral tracking, force join check (MoneyZone Edition)"""
 
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS, REFERRAL_PREFIX, DEFAULT_WELCOME_MSG
-from middleware.force_join import require_join
+from middleware.force_join import is_user_channel_member
 from utils.keyboard import main_menu_keyboard, force_join_keyboard
 
 
@@ -20,7 +20,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if arg.startswith(REFERRAL_PREFIX):
             try:
                 referrer_id = int(arg[len(REFERRAL_PREFIX):])
-                # Don't let users refer themselves
                 if referrer_id == user.id:
                     referrer_id = None
             except ValueError:
@@ -43,14 +42,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=referrer_id,
                 text=(
-                    f"🎉 *New Referral!*\n\n"
-                    f"👤 {user.first_name or 'Someone'} joined using your link!\n"
-                    f"📊 Total referrals: `{ref_count}`"
+                    f"🎉 💸 *NEW MONEYZONE REFERRAL!* 💸 🎉\n"
+                    f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+                    f"👤 *{user.first_name or 'Someone'}* joined using your link!\n"
+                    f"📊 *Your Total Referrals:* `{ref_count}`"
                 ),
                 parse_mode="Markdown"
             )
         except Exception:
-            pass  # Referrer may have blocked the bot
+            pass
 
     # Check force join channels
     channels = await db.get_channels()
@@ -58,17 +58,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         not_joined = []
         joined_ids = set()
         for ch in channels:
-            try:
-                member = await context.bot.get_chat_member(ch["channel_id"], user.id)
-                if member.status in ["left", "kicked"]:
-                    not_joined.append(ch)
-                else:
-                    joined_ids.add(ch["channel_id"])
-            except Exception:
+            joined = await is_user_channel_member(context.bot, ch["channel_id"], user.id)
+            if joined:
+                joined_ids.add(ch["channel_id"])
+            else:
                 not_joined.append(ch)
 
         if not_joined:
-            # Get custom welcome message or default
             welcome = await db.get_setting("welcome_msg") or DEFAULT_WELCOME_MSG
             bot_me = await context.bot.get_me()
             welcome = welcome.format(bot_name=bot_me.first_name)
@@ -77,20 +73,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(welcome, reply_markup=markup, parse_mode="Markdown")
             return
 
-    # All channels joined (or no channels set) — show main menu
+    # All channels joined
     await db.set_verified(user.id, True)
     await _show_main_menu(update, context, is_new)
 
 
 async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is_new: bool = False):
-    """Display the main menu."""
+    """Display the MoneyZone main menu."""
     user = update.effective_user
-    greeting = "🎉 Welcome" if is_new else "👋 Welcome back"
-    name = user.first_name or "there"
+    greeting = "🎉 WELCOME TO MONEYZONE" if is_new else "👋 WELCOME BACK TO MONEYZONE"
+    name = user.first_name or "VIP User"
 
     text = (
-        f"{greeting}, *{name}*! 🚀\n\n"
-        "Choose an option from the menu below:"
+        f"⚡ 💸 *{greeting}* 💸 ⚡\n"
+        f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+        f"👑 *Hello, {name}!* 🔥\n\n"
+        "Claim Lenskart vouchers, build your referral empire, and track your rewards!\n"
+        "Select an option from the menu below:"
     )
     await update.message.reply_text(
         text, reply_markup=main_menu_keyboard(), parse_mode="Markdown"

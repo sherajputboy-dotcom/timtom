@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Async SQLite Database Layer"""
+"""Async SQLite Database Layer with High-Concurrency WAL Mode & Connection Management"""
 
 import aiosqlite
+import logging
 from config import DB_PATH
 
+logger = logging.getLogger(__name__)
+
 SCHEMA = """
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
+PRAGMA synchronous=NORMAL;
+
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
@@ -62,35 +69,49 @@ CREATE TABLE IF NOT EXISTS settings (
 
 
 class Database:
-    """Async SQLite database for bot persistence."""
+    """Async SQLite database for high-concurrency bot persistence."""
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DB_PATH
+        self._conn = None
+
+    async def _get_connection(self):
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(self.db_path)
+            self._conn.row_factory = aiosqlite.Row
+            await self._conn.execute("PRAGMA journal_mode=WAL;")
+            await self._conn.execute("PRAGMA busy_timeout=5000;")
+            await self._conn.execute("PRAGMA synchronous=NORMAL;")
+        return self._conn
 
     async def init(self):
-        """Initialize database and create tables."""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.executescript(SCHEMA)
-            await db.commit()
+        """Initialize database and create tables with WAL mode."""
+        conn = await self._get_connection()
+        await conn.executescript(SCHEMA)
+        await conn.commit()
+        logger.info("⚡ SQLite WAL mode & high-concurrency settings enabled.")
+
+    async def close(self):
+        if self._conn:
+            await self._conn.close()
+            self._conn = None
 
     async def _fetch_one(self, query: str, params: tuple = None) -> dict:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(query, params or ())
+        conn = await self._get_connection()
+        async with conn.execute(query, params or ()) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     async def _fetch_all(self, query: str, params: tuple = None) -> list:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(query, params or ())
+        conn = await self._get_connection()
+        async with conn.execute(query, params or ()) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
     async def _execute(self, query: str, params: tuple = None) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute(query, params or ())
-            await db.commit()
+        conn = await self._get_connection()
+        async with conn.execute(query, params or ()) as cursor:
+            await conn.commit()
             return cursor.lastrowid
 
     # ===================== USER METHODS =====================
@@ -100,7 +121,6 @@ class Database:
         """Add new user. Returns True if new, False if existing."""
         existing = await self.get_user(user_id)
         if existing:
-            # Update username/name in case they changed
             await self._execute(
                 "UPDATE users SET username = ?, first_name = ?, last_name = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?",
                 (username, first_name, last_name, user_id)
@@ -111,7 +131,6 @@ class Database:
             "VALUES (?, ?, ?, ?, ?, ?)",
             (user_id, username, first_name, last_name, language_code, referred_by)
         )
-        # Increment referrer's count
         if referred_by:
             await self._execute(
                 "UPDATE users SET referral_count = referral_count + 1 WHERE user_id = ?",
@@ -166,7 +185,6 @@ class Database:
         )
 
     async def search_user(self, query: str) -> dict:
-        """Search user by ID or username."""
         if query.isdigit():
             return await self.get_user(int(query))
         return await self._fetch_one(
