@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual env
+venv/
+env/
+.venv/
+
+# Database (generated at runtime)
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Old monolith (not needed)
+lenskrt.py
+
+# Env files (never commit secrets!)
+.env
+.env.*
