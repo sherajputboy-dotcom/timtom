@@ -6,9 +6,12 @@ import time
 import uuid
 import hashlib
 import base64
+import logging
 import requests
 from datetime import datetime
 from config import LENSKART_BASE_URL, DEFAULT_STEPS, DEFAULT_CAMPAIGN
+
+logger = logging.getLogger(__name__)
 
 # Device fingerprint pools
 BRANDS = ["xiaomi", "realme", "samsung", "oneplus", "oppo", "vivo"]
@@ -41,6 +44,19 @@ class LenskartDevice:
         self.customer_type = "EXISTING"
         self.session = requests.Session()
         self.x_assertion = self._generate_assertion()
+        self.last_error = None  # Stores last API error for debugging
+
+    @property
+    def _bare_phone(self) -> str:
+        """Phone number without country code prefix (e.g. '8564789268')."""
+        p = self.phone
+        if p.startswith('+'):
+            p = p[1:]  # strip +
+        # Strip known country codes
+        code = self.phone_code.replace('+', '')
+        if p.startswith(code):
+            p = p[len(code):]
+        return p
 
     def _generate_assertion(self) -> str:
         """Generate fake x-assertion header."""
@@ -93,8 +109,14 @@ class LenskartDevice:
         if params:
             url += "?" + "&".join(f"{k}={v}" for k, v in params.items())
         try:
-            return self.session.post(url, headers=self._headers(), json=body, timeout=30)
-        except Exception:
+            r = self.session.post(url, headers=self._headers(), json=body, timeout=30)
+            logger.info(f"POST {path} -> {r.status_code}")
+            if r.status_code != 200:
+                logger.warning(f"POST {path} body={body} -> {r.status_code}: {r.text[:300]}")
+            return r
+        except Exception as e:
+            logger.error(f"POST {path} exception: {e}")
+            self.last_error = str(e)
             return None
 
     def _get(self, path: str, params: dict = None):
@@ -103,8 +125,14 @@ class LenskartDevice:
         if params:
             url += "?" + "&".join(f"{k}={v}" for k, v in params.items())
         try:
-            return self.session.get(url, headers=self._headers(), timeout=30)
-        except Exception:
+            r = self.session.get(url, headers=self._headers(), timeout=30)
+            logger.info(f"GET {path} -> {r.status_code}")
+            if r.status_code != 200:
+                logger.warning(f"GET {path} -> {r.status_code}: {r.text[:300]}")
+            return r
+        except Exception as e:
+            logger.error(f"GET {path} exception: {e}")
+            self.last_error = str(e)
             return None
 
     def create_session(self) -> bool:
@@ -113,23 +141,35 @@ class LenskartDevice:
         if r and r.status_code == 200:
             self.session_token = r.json().get("result", {}).get("id")
             return bool(self.session_token)
+        self.last_error = f"Session failed: {r.status_code if r else 'no response'}"
         return False
 
     def send_otp(self) -> dict:
         """Send OTP to phone number."""
         if not self.session_token:
+            self.last_error = "No session token"
             return None
-        body = {"phoneCode": self.phone_code, "telephone": self.phone}
+        # API expects bare phone (no country code prefix) + separate phoneCode
+        body = {"phoneCode": self.phone_code, "telephone": self._bare_phone}
         r = self._post("/v3/customers/sendOtp", body)
         if r and r.status_code == 200:
-            res = r.json().get("result") or {}
+            data = r.json()
+            res = data.get("result") or {}
             self.customer_type = "NEW" if res.get("isNewUser") else "EXISTING"
             return res
+        # Store error for debugging
+        if r:
+            try:
+                self.last_error = f"{r.status_code}: {r.json()}"
+            except Exception:
+                self.last_error = f"{r.status_code}: {r.text[:200]}"
+        else:
+            self.last_error = "No response from API"
         return None
 
     def verify_otp(self, code: str) -> dict:
         """Verify OTP and authenticate."""
-        body = {"code": code, "phoneCode": self.phone_code, "telephone": self.phone}
+        body = {"code": code, "phoneCode": self.phone_code, "telephone": self._bare_phone}
         r = self._post("/v2/customers/authenticate/mobile", body)
         if r and r.status_code == 200:
             res = r.json().get("result") or {}

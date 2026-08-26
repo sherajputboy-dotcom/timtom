@@ -79,16 +79,18 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         device = LenskartDevice(phone)
 
         if not device.create_session():
+            err = device.last_error or "Unknown session error"
             await update.message.reply_text(
-                f"❌ Failed to create session for `{phone}`",
+                f"❌ Failed to create session for `{phone}`\n`{err}`",
                 parse_mode="Markdown"
             )
             return True
 
         otp_res = device.send_otp()
         if not otp_res:
+            err = device.last_error or "Unknown OTP error"
             await update.message.reply_text(
-                f"❌ Failed to send OTP to `{phone}`",
+                f"❌ Failed to send OTP to `{phone}`\n`{err}`",
                 parse_mode="Markdown"
             )
             return True
