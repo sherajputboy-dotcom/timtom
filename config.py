@@ -12,7 +12,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 _admin_raw = os.getenv("ADMIN_IDS", "")
 if _admin_raw:
     try:
-        ADMIN_IDS = json.loads(_admin_raw)  # try JSON
+        parsed = json.loads(_admin_raw)
+        ADMIN_IDS = parsed if isinstance(parsed, list) else [parsed]
     except (json.JSONDecodeError, ValueError):
         ADMIN_IDS = [int(x.strip()) for x in _admin_raw.split(",") if x.strip().isdigit()]
 else:
