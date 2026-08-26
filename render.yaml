@@ -1,9 +1,9 @@
 # Render.com deployment config
-# This bot runs as a Background Worker (not a Web Service)
-# because it polls Telegram — no HTTP server needed.
+# Runs as a Web Service with a health-check HTTP server on $PORT
+# while the Telegram bot polls in the background.
 
 services:
-  - type: worker
+  - type: web
     name: lenskart-bot
     runtime: python
     buildCommand: pip install -r requirements.txt

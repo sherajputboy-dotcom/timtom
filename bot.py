@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
 🤖 Lenskart Advanced Telegram Bot
-Entry point — registers all handlers and starts polling.
+Entry point — registers all handlers, starts health server + polling.
+Runs a lightweight HTTP health-check server on $PORT so Render's
+free-tier Web Service stays alive, while the bot polls Telegram.
 """
 
+import os
 import asyncio
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -28,6 +33,41 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+
+# ===================== HEALTH CHECK SERVER =====================
+# Render expects a web service to bind to $PORT. This lightweight
+# server satisfies that requirement while the bot polls Telegram.
+
+class HealthHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler for Render health checks."""
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(
+            b"<html><body>"
+            b"<h1>&#129302; Lenskart Bot</h1>"
+            b"<p>Bot is running!</p>"
+            b"<ul>"
+            b"<li>Status: <strong>ONLINE</strong></li>"
+            b"<li>Type: Telegram Polling</li>"
+            b"</ul>"
+            b"</body></html>"
+        )
+
+    def log_message(self, format, *args):
+        """Suppress default request logs to keep console clean."""
+        pass
+
+
+def start_health_server():
+    """Start HTTP health-check server on $PORT (default 10000)."""
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"🌐 Health server running on port {port}")
+    server.serve_forever()
 
 
 # ===================== MESSAGE ROUTER =====================
@@ -114,7 +154,7 @@ async def post_shutdown(application: Application):
 # ===================== MAIN =====================
 
 def main():
-    """Start the bot."""
+    """Start the bot + health server."""
     print("=" * 60)
     print("🤖 LENSKART ADVANCED TELEGRAM BOT")
     print(f"👤 Admin IDs: {ADMIN_IDS}")
@@ -125,10 +165,15 @@ def main():
         print("   Get token from @BotFather on Telegram")
         return
 
-    if ADMIN_IDS == [123456789]:
-        print("\n⚠️ WARNING: Using default admin ID!")
-        print("   Update ADMIN_IDS in config.py with your Telegram user ID")
+    if not ADMIN_IDS:
+        print("\n⚠️ WARNING: No admin IDs set!")
+        print("   Set ADMIN_IDS env var with your Telegram user ID")
         print("   Get your ID from @userinfobot on Telegram")
+
+    # Start health-check web server in background thread
+    # (Render needs a process listening on $PORT)
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
 
     # Build application
     application = (
