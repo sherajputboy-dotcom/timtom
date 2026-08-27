@@ -3,13 +3,11 @@
 
 import time
 from functools import wraps
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS, CHANNEL_CACHE_TTL
 from utils.keyboard import force_join_keyboard
 
-# In-memory cache for channel membership to handle 100+ concurrent users smoothly
-# Structure: { (user_id, channel_id): (is_member: bool, timestamp: float) }
 MEMBERSHIP_CACHE = {}
 
 
@@ -29,7 +27,6 @@ async def is_user_channel_member(bot, channel_id: int, user_id: int) -> bool:
         MEMBERSHIP_CACHE[cache_key] = (is_member, now)
         return is_member
     except Exception:
-        # If API fails or channel issue, assume not joined
         MEMBERSHIP_CACHE[cache_key] = (False, now)
         return False
 
@@ -42,8 +39,7 @@ def clear_user_membership_cache(user_id: int):
 
 
 def require_join(func):
-    """Decorator: blocks handler unless user has joined all required channels.
-    Admins bypass. Banned users and maintenance mode are also checked."""
+    """Decorator: blocks handler unless user has joined all required channels."""
 
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
@@ -62,7 +58,7 @@ def require_join(func):
 
         # Check ban
         if await db.is_banned(user_id):
-            text = "🚫 *ACCESS DENIED*\n\nYou have been banned from MoneyZone Bot."
+            text = "🚫 *Access Denied*\n\nYou are banned from using this bot."
             if update.callback_query:
                 await update.callback_query.answer(text, show_alert=True)
             elif update.message:
@@ -72,7 +68,7 @@ def require_join(func):
         # Check maintenance mode
         maintenance = await db.get_setting("maintenance_mode", "0")
         if maintenance == "1":
-            text = "🔧 *MONEYZONE SYSTEM MAINTENANCE*\n\nBot is currently undergoing system upgrades. Please check back shortly!"
+            text = "🔧 *Maintenance Mode*\n\nThe bot is under maintenance. Please try again later!"
             if update.callback_query:
                 await update.callback_query.answer(text, show_alert=True)
             elif update.message:
@@ -95,13 +91,9 @@ def require_join(func):
             if not_joined:
                 markup = force_join_keyboard(channels, joined_ids)
                 text = (
-                    "⚡ 💸 *MONEYZONE MEMBER VERIFICATION* 💸 ⚡\n"
-                    "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
-                    "⚠️ *Access Restricted!*\n"
-                    "You must join all our official sponsor channels to unlock Lenskart Voucher claims and rewards.\n\n"
-                    "📌 *Status Legend:*\n"
-                    "🟢 `JOINED`  |  🔴 `ACTION REQUIRED`\n\n"
-                    "👇 *Join the channels below, then tap ✅ VERIFY ACCESS NOW:*"
+                    "📢 *MANDATORY CHANNEL JOIN*\n\n"
+                    "To access the *Lenskart Reward Bot*, you must join our required channels below.\n\n"
+                    "👉 Click each channel button below to join, then tap *✅ Verify Access*!"
                 )
                 if update.callback_query:
                     try:
@@ -116,7 +108,6 @@ def require_join(func):
                     )
                 return
 
-        # Update last active
         await db.update_last_active(user_id)
         return await func(update, context, *args, **kwargs)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lenskart reward claiming handlers — OTP flow, reward claim, voucher check"""
+"""Lenskart reward claiming handlers — OTP flow, reward claim, voucher check & points deduction"""
 
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 from middleware.force_join import require_join
 from utils.device import LenskartDevice
 from utils.keyboard import main_menu_keyboard, back_button
-from config import DEFAULT_STEPS
+from config import DEFAULT_STEPS, CLAIM_COST_POINTS, CREDIT_FOOTER
 
 # In-memory pending OTP store
 pending_otps = {}
@@ -15,48 +15,72 @@ pending_otps = {}
 
 @require_join
 async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle 🏃 Claim Reward button."""
-    query = update.callback_query
-    await query.answer()
+    """Handle 🏃 Claim Reward button with Points check."""
     db = context.bot_data["db"]
+    user = update.effective_user
+
+    # Handle both callback query and text message (reply keyboard)
+    is_callback = update.callback_query is not None
+    if is_callback:
+        await update.callback_query.answer()
 
     # Check if claims are enabled
     claims_enabled = await db.get_setting("claims_enabled", "1")
     if claims_enabled == "0":
-        await query.edit_message_text(
-            "❌ *Claims are currently disabled.*\n\nPlease try again later.",
-            reply_markup=back_button("main_menu"),
-            parse_mode="Markdown"
+        msg = "❌ *Claims are currently disabled.*\n\nPlease try again later."
+        if is_callback:
+            await update.callback_query.edit_message_text(msg, reply_markup=back_button("main_menu"), parse_mode="Markdown")
+        else:
+            await update.message.reply_text(msg, reply_markup=back_button("main_menu"), parse_mode="Markdown")
+        return
+
+    # Check user points balance (Must have at least 20 points)
+    points = await db.get_user_points(user.id)
+    if points < CLAIM_COST_POINTS:
+        msg = (
+            f"❌ *INSUFFICIENT POINTS!*\n\n"
+            f"💰 *Your Balance:* `{points} Points`\n"
+            f"🏃 *Required for Claim:* `{CLAIM_COST_POINTS} Points`\n\n"
+            f"🔥 *Earn Points:* Share your referral link with friends to get *+50 Points* per referral!"
         )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👥 Refer Friends (+50 Pts)", callback_data="user_referrals")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="main_menu")]
+        ])
+        if is_callback:
+            await update.callback_query.edit_message_text(msg, reply_markup=keyboard, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="Markdown")
         return
 
     context.user_data["action"] = "waiting_phone"
-    await query.edit_message_text(
-        "🏃 *Claim Lenskart Reward*\n\n"
-        "📱 Enter your phone number:\n\n"
-        "Examples:\n"
-        "• `9876543210` (Indian number)\n"
-        "• `+919876543210` (with country code)\n\n"
-        "❌ Send /cancel to cancel.",
-        parse_mode="Markdown"
+    msg_text = (
+        f"🏃 *CLAIM LENSKART VOUCHER*\n\n"
+        f"💳 *Cost:* `{CLAIM_COST_POINTS} Points` (Balance: `{points} Points`)\n\n"
+        f"📱 *Enter your 10-digit mobile number:*\n\n"
+        f"Examples:\n"
+        f"• `9876543210`\n"
+        f"• `+919876543210`\n\n"
+        f"❌ Send /cancel to exit."
     )
+    if is_callback:
+        await update.callback_query.edit_message_text(msg_text, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(msg_text, parse_mode="Markdown")
 
 
 async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process phone number input."""
     if context.user_data.get("action") != "waiting_phone":
-        return False  # Not our input
+        return False
 
     user = update.effective_user
     phone = update.message.text.strip()
 
-    # Normalize phone number
     if phone.startswith("/"):
         if phone == "/cancel":
             context.user_data["action"] = None
-            await update.message.reply_text(
-                "❌ Cancelled.", reply_markup=main_menu_keyboard()
-            )
+            await update.message.reply_text("❌ Cancelled.", reply_markup=main_menu_keyboard())
         return True
 
     if not phone.startswith("+"):
@@ -66,20 +90,19 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             phone = f"+91{phone}"
         else:
             await update.message.reply_text(
-                "❌ Invalid phone number! Use: `9876543210` or `+919876543210`",
+                "❌ Invalid phone number! Enter a 10-digit number e.g. `9876543210`",
                 parse_mode="Markdown"
             )
             return True
 
     context.user_data["action"] = None
-    await update.message.reply_text("⏳ Setting up device & sending OTP...")
+    await update.message.reply_text("⏳ *Initializing device fingerprint & requesting OTP...*", parse_mode="Markdown")
 
-    # Create device and send OTP
     try:
         device = LenskartDevice(phone)
 
         if not device.create_session():
-            err = device.last_error or "Unknown session error"
+            err = device.last_error or "Session initialization failed"
             await update.message.reply_text(
                 f"❌ Failed to create session for `{phone}`\n`{err}`",
                 parse_mode="Markdown"
@@ -88,24 +111,22 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         otp_res = device.send_otp()
         if not otp_res:
-            err = device.last_error or "Unknown OTP error"
+            err = device.last_error or "OTP request failed"
             await update.message.reply_text(
                 f"❌ Failed to send OTP to `{phone}`\n`{err}`",
                 parse_mode="Markdown"
             )
             return True
 
-        # Store pending OTP
         pending_otps[f"{user.id}_{phone}"] = device
         context.user_data["action"] = "waiting_otp"
         context.user_data["pending_phone"] = phone
 
         await update.message.reply_text(
-            f"✅ *OTP Sent!*\n\n"
+            f"✅ *OTP SENT SUCCESSFULLY!*\n\n"
             f"📱 Phone: `{phone}`\n"
-            f"📱 Device: `{device.device_info}`\n"
-            f"🆔 UDID: `{device.udid}`\n\n"
-            f"📝 *Enter the OTP you received:*\n"
+            f"📱 Device Spoof: `{device.device_info}`\n\n"
+            f"📝 *Enter the 4 or 6-digit OTP code received on your phone:*\n"
             f"❌ Send /cancel to cancel.",
             parse_mode="Markdown"
         )
@@ -116,9 +137,9 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process OTP input."""
+    """Process OTP input & claim reward."""
     if context.user_data.get("action") != "waiting_otp":
-        return False  # Not our input
+        return False
 
     user = update.effective_user
     otp_code = update.message.text.strip()
@@ -127,12 +148,9 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if otp_code == "/cancel":
             context.user_data["action"] = None
             context.user_data["pending_phone"] = None
-            await update.message.reply_text(
-                "❌ Cancelled.", reply_markup=main_menu_keyboard()
-            )
+            await update.message.reply_text("❌ Cancelled.", reply_markup=main_menu_keyboard())
         return True
 
-    # Validate OTP format
     if not otp_code.isdigit() or len(otp_code) not in (4, 6):
         await update.message.reply_text("❌ Invalid OTP! Enter a 4 or 6-digit code.")
         return True
@@ -142,20 +160,18 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     device = pending_otps.get(key)
 
     if not device:
-        await update.message.reply_text("❌ Session expired! Start again from the menu.")
+        await update.message.reply_text("❌ Session expired! Please start again.")
         context.user_data["action"] = None
         return True
 
-    await update.message.reply_text("⏳ Verifying OTP...")
+    await update.message.reply_text("⏳ *Authenticating OTP & injecting 30,000 steps...*", parse_mode="Markdown")
 
-    # Verify OTP
     verify_res = device.verify_otp(otp_code)
     if not verify_res:
-        await update.message.reply_text("❌ Invalid OTP! Try again or send /cancel.")
+        await update.message.reply_text("❌ Invalid OTP! Check the code and try again or send /cancel.")
         return True
 
-    # Get user profile and claim reward
-    await update.message.reply_text("⏳ Claiming reward...")
+    await update.message.reply_text("⏳ *Claiming gift voucher...*", parse_mode="Markdown")
     device.get_me()
 
     db = context.bot_data["db"]
@@ -167,7 +183,11 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tier = reward.get("tier")
         expiry = reward.get("giftVoucherExpiryDate")
 
-        # Save to database
+        # Deduct 20 points from user balance
+        await db.deduct_points(user.id, CLAIM_COST_POINTS)
+        new_balance = await db.get_user_points(user.id)
+
+        # Save voucher to DB
         await db.add_voucher(
             user_id=user.id,
             phone=phone,
@@ -179,35 +199,30 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         text = (
-            f"🎉 *REWARD CLAIMED!* 🎉\n\n"
+            f"🎉 *REWARD CLAIMED SUCCESSFULLY!* 🎉\n\n"
             f"📱 Phone: `{phone}`\n"
-            f"🎫 Voucher: `{voucher_code}`\n"
+            f"🎫 Voucher Code: `{voucher_code}`\n"
         )
         if tier:
             text += f"🏆 Tier: `{tier}`\n"
         text += (
             f"📱 Device: `{device.device_info}`\n"
-            f"🆔 UDID: `{device.udid}`\n"
+            f"💳 Remaining Balance: `{new_balance} Points`\n\n"
+            f"✅ Saved to your Voucher Vault!\n\n"
+            f"{CREDIT_FOOTER}"
         )
-        if expiry:
-            from datetime import datetime
-            try:
-                exp_dt = datetime.fromtimestamp(expiry / 1000)
-                text += f"⏰ Expiry: `{exp_dt.strftime('%d %b %Y')}`\n"
-            except Exception:
-                pass
-        text += "\n✅ Saved to your account!"
 
         await update.message.reply_text(
             text, reply_markup=main_menu_keyboard(), parse_mode="Markdown"
         )
     else:
+        err = device.last_error or "Voucher claim rejected"
         await update.message.reply_text(
-            f"❌ Failed to claim reward for `{phone}`\n\n"
-            "Possible reasons:\n"
-            "• Already claimed today\n"
-            "• Campaign not active\n"
-            "• API error",
+            f"❌ *Failed to claim voucher for `{phone}`*\n\n"
+            f"Details: `{err}`\n\n"
+            f"Possible reasons:\n"
+            f"• Already claimed today on this account\n"
+            f"• Lenskart campaign limit reached",
             reply_markup=main_menu_keyboard(),
             parse_mode="Markdown"
         )
@@ -220,8 +235,34 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route text input based on current action state."""
-    # Try phone input first, then OTP
+    """Route text input based on state or persistent reply keyboard button."""
+    text = update.message.text.strip() if update.message and update.message.text else ""
+
+    # Check for Reply Keyboard button triggers
+    if text == "🏃 Claim Reward":
+        await claim_callback(update, context)
+        return True
+    elif text == "🎁 My Vouchers":
+        from handlers.user_menu import show_vouchers
+        await show_vouchers(update, context)
+        return True
+    elif text == "👥 Refer & Earn":
+        from handlers.user_menu import show_referrals
+        await show_referrals(update, context)
+        return True
+    elif text == "👤 My Profile":
+        from handlers.user_menu import show_profile
+        await show_profile(update, context)
+        return True
+    elif text == "🏆 Leaderboard":
+        from handlers.user_menu import show_leaderboard
+        await show_leaderboard(update, context)
+        return True
+    elif text == "ℹ️ Help":
+        from handlers.user_menu import show_help
+        await show_help(update, context)
+        return True
+
     if await handle_phone_input(update, context):
         return True
     if await handle_otp_input(update, context):

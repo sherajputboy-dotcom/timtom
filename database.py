@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Async SQLite Database Layer with High-Concurrency WAL Mode & Connection Management"""
+"""Async SQLite Database Layer with High-Concurrency WAL Mode & Points System"""
 
 import aiosqlite
 import logging
@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     language_code TEXT DEFAULT 'en',
     referred_by INTEGER,
     referral_count INTEGER DEFAULT 0,
+    points INTEGER DEFAULT 20,
     is_banned INTEGER DEFAULT 0,
     is_verified INTEGER DEFAULT 0,
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -88,8 +89,13 @@ class Database:
         """Initialize database and create tables with WAL mode."""
         conn = await self._get_connection()
         await conn.executescript(SCHEMA)
-        await conn.commit()
-        logger.info("⚡ SQLite WAL mode & high-concurrency settings enabled.")
+        # Migrate schema if points column missing
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 20;")
+            await conn.commit()
+        except Exception:
+            pass  # Column already exists
+        logger.info("⚡ SQLite WAL mode & points system initialized.")
 
     async def close(self):
         if self._conn:
@@ -114,11 +120,11 @@ class Database:
             await conn.commit()
             return cursor.lastrowid
 
-    # ===================== USER METHODS =====================
+    # ===================== USER & POINTS METHODS =====================
 
     async def add_user(self, user_id: int, username: str = None, first_name: str = None,
                        last_name: str = None, language_code: str = "en", referred_by: int = None) -> bool:
-        """Add new user. Returns True if new, False if existing."""
+        """Add new user. Gives 20 starting points. Referrer gets +50 points."""
         existing = await self.get_user(user_id)
         if existing:
             await self._execute(
@@ -126,20 +132,38 @@ class Database:
                 (username, first_name, last_name, user_id)
             )
             return False
+
+        # Insert new user with 20 default points
         await self._execute(
-            "INSERT INTO users (user_id, username, first_name, last_name, language_code, referred_by) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO users (user_id, username, first_name, last_name, language_code, referred_by, points) "
+            "VALUES (?, ?, ?, ?, ?, ?, 20)",
             (user_id, username, first_name, last_name, language_code, referred_by)
         )
+
+        # Referrer gets +1 referral count and +50 points bonus!
         if referred_by:
             await self._execute(
-                "UPDATE users SET referral_count = referral_count + 1 WHERE user_id = ?",
+                "UPDATE users SET referral_count = referral_count + 1, points = points + 50 WHERE user_id = ?",
                 (referred_by,)
             )
         return True
 
     async def get_user(self, user_id: int) -> dict:
         return await self._fetch_one("SELECT * FROM users WHERE user_id = ?", (user_id,))
+
+    async def get_user_points(self, user_id: int) -> int:
+        user = await self.get_user(user_id)
+        return user.get("points", 20) if user else 20
+
+    async def add_points(self, user_id: int, amount: int = 50):
+        await self._execute("UPDATE users SET points = points + ? WHERE user_id = ?", (amount, user_id))
+
+    async def deduct_points(self, user_id: int, amount: int = 20) -> bool:
+        points = await self.get_user_points(user_id)
+        if points < amount:
+            return False
+        await self._execute("UPDATE users SET points = points - ? WHERE user_id = ?", (amount, user_id))
+        return True
 
     async def update_last_active(self, user_id: int):
         await self._execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (user_id,))
@@ -214,7 +238,7 @@ class Database:
 
     async def get_top_referrers(self, limit: int = 10) -> list:
         return await self._fetch_all(
-            "SELECT user_id, username, first_name, referral_count FROM users "
+            "SELECT user_id, username, first_name, referral_count, points FROM users "
             "WHERE referral_count > 0 ORDER BY referral_count DESC LIMIT ?",
             (limit,)
         )

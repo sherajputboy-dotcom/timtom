@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-🤖 MONEYZONE ADVANCED TELEGRAM BOT
-Entry point — registers all handlers, starts health server + self-ping keepalive + polling.
-Runs a lightweight HTTP health-check server on $PORT so Render's
-free-tier Web Service stays alive, while the bot polls Telegram.
+🕶️ LENSKART REWARD BYPASS BOT (Powered by MoneyZone)
+Entry point — registers all handlers, health server + self-ping keepalive + polling.
 """
 
 import os
@@ -47,13 +45,13 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(
-            b"<html><head><title>MONEYZONE BOT</title></head>"
+            b"<html><head><title>Lenskart Reward Bot</title></head>"
             b"<body style='font-family:sans-serif; background:#0d1117; color:#58a6ff; text-align:center; padding:50px;'>"
-            b"<h1>&#9889; &#128184; MONEYZONE REWARDS BOT &#128184; &#9889;</h1>"
-            b"<p style='font-size:18px; color:#7ee787;'>&#9989; System Operational | Telegram Polling Active</p>"
+            b"<h1>&#128083; LENSKART REWARD BYPASS BOT &#128083;</h1>"
+            b"<p style='font-size:18px; color:#7ee787;'>&#9989; System Operational | Created by MoneyZone</p>"
             b"<div style='display:inline-block; border:1px solid #30363d; padding:20px; border-radius:10px; background:#161b22;'>"
-            b"<p>&#128642; High Concurrency Engine: <strong>ENABLED (WAL)</strong></p>"
-            b"<p>&#128276; Render Keep-Alive: <strong>ACTIVE</strong></p>"
+            b"<p>&#9889; High Concurrency Engine: <strong>ENABLED (WAL)</strong></p>"
+            b"<p>&#9889; Render Keep-Alive: <strong>ACTIVE</strong></p>"
             b"</div>"
             b"</body></html>"
         )
@@ -66,12 +64,12 @@ def start_health_server():
     """Start HTTP health-check server on $PORT (default 10000)."""
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    logger.info(f"🌐 MoneyZone Health server running on port {port}")
+    logger.info(f"🌐 Health server running on port {port}")
     server.serve_forever()
 
 
 def keep_alive_worker():
-    """Self-ping worker to prevent Render web service from going to sleep."""
+    """Self-ping worker to prevent Render web service from sleeping."""
     url = os.environ.get("RENDER_EXTERNAL_URL")
     port = int(os.environ.get("PORT", 10000))
     ping_target = url if url else f"http://127.0.0.1:{port}"
@@ -80,7 +78,7 @@ def keep_alive_worker():
     time.sleep(15)
     while True:
         try:
-            req = urllib.request.Request(ping_target, headers={"User-Agent": "MoneyZone-KeepAlive/1.0"})
+            req = urllib.request.Request(ping_target, headers={"User-Agent": "LenskartBot-KeepAlive/1.0"})
             with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
                     logger.debug("⚡ Keep-alive ping successful")
@@ -92,7 +90,7 @@ def keep_alive_worker():
 # ===================== MESSAGE ROUTER =====================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route all text messages to the correct handler based on user state."""
+    """Route all text messages (including persistent reply keyboard buttons)."""
     user = update.effective_user
     if not user:
         return
@@ -105,16 +103,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if result is not False:
                 return
 
-    # Lenskart flow
+    # Lenskart flow & Reply Keyboard triggers
     result = await lenskart_text(update, context)
     if result:
         return
 
     # Unrecognized text
     await update.message.reply_text(
-        "⚡ *MONEYZONE BOT*\n\n"
-        "🤔 I didn't recognize that command.\n"
-        "Press /start to open the 💸 MoneyZone Main Menu!",
+        "🕶️ *LENSKART REWARD BOT*\n\n"
+        "🤔 Command not recognized.\n"
+        "Press /start or tap a button from the menu below!",
         parse_mode="Markdown"
     )
 
@@ -161,10 +159,10 @@ async def post_init(application: Application):
     db = Database()
     await db.init()
     application.bot_data["db"] = db
-    logger.info("✅ High-concurrency Database initialized")
+    logger.info("✅ Database & WAL mode initialized")
 
     bot_me = await application.bot.get_me()
-    logger.info(f"🤖 MoneyZone Bot: @{bot_me.username} ({bot_me.first_name})")
+    logger.info(f"🤖 Lenskart Bot: @{bot_me.username} ({bot_me.first_name})")
 
 
 async def post_shutdown(application: Application):
@@ -172,7 +170,7 @@ async def post_shutdown(application: Application):
     db = application.bot_data.get("db")
     if db:
         await db.close()
-    logger.info("👋 MoneyZone Bot shut down cleanly.")
+    logger.info("👋 Bot shut down cleanly.")
 
 
 # ===================== MAIN =====================
@@ -180,7 +178,7 @@ async def post_shutdown(application: Application):
 def main():
     """Start the bot + health server + keepalive."""
     print("=" * 60)
-    print("⚡ 💸 MONEYZONE ADVANCED TELEGRAM BOT 💸 ⚡")
+    print("🕶️ LENSKART REWARD BYPASS BOT (Powered by MoneyZone)")
     print(f"👤 Admin IDs: {ADMIN_IDS}")
     print("=" * 60)
 
@@ -208,7 +206,7 @@ def main():
         .token(BOT_TOKEN)
         .post_init(post_init)
         .post_shutdown(post_shutdown)
-        .concurrent_updates(True)  # Enable concurrent update processing for 100+ users!
+        .concurrent_updates(True)
         .build()
     )
 
@@ -218,7 +216,7 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("\n✅ MoneyZone Bot Started! High-Concurrency mode ACTIVE.")
+    print("\n✅ Lenskart Bot Started! High-Concurrency mode ACTIVE.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

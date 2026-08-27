@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bot Configuration — MoneyZone Edition"""
+"""Bot Configuration — Lenskart Bypass Bot (Powered by MoneyZone)"""
 
 import os
 import json
@@ -26,27 +26,33 @@ DB_PATH = "bot_database.db"
 LENSKART_BASE_URL = "https://api-gateway.juno.lenskart.com"
 DEFAULT_STEPS = 30000
 DEFAULT_CAMPAIGN = "run-for-frame"
+CLAIM_COST_POINTS = 20
+REFERRAL_BONUS_POINTS = 50
+WELCOME_BONUS_POINTS = 20
 
 # ============= MESSAGES & BRANDING =============
-BRAND_NAME = "💸 MONEYZONE REWARDS 💸"
+BRAND_NAME = "🕶️ Lenskart Reward Bypass Bot"
+CREDIT_FOOTER = "⚡ *Created by MoneyZone*"
 
 DEFAULT_WELCOME_MSG = (
-    "⚡ 💸 *WELCOME TO MONEYZONE OFFICIAL* 💸 ⚡\n"
-    "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
-    "🔥 *Claim Premium Lenskart Gift Vouchers Instantly!*\n"
-    "👥 *Refer Friends & Multiply Your Earnings!*\n\n"
-    "📌 *Mandatory Requirement:*\n"
-    "To access our premium features, please join our official sponsor channels below, then click *✅ VERIFY ACCESS*."
+    "🕶️ *WELCOME TO LENSKART REWARD BOT* 🕶️\n\n"
+    "🏃 *Bypass 30,000 steps & claim Lenskart Gift Vouchers instantly!*\n\n"
+    "💰 *Points Balance System:*\n"
+    "🎁 Welcome Bonus: *20 Points*\n"
+    "🏃 Claim Cost: *20 Points / run*\n"
+    "👥 Referral Reward: *50 Points / friend*\n\n"
+    "📌 *Mandatory Step:*\n"
+    "Join our required channels below, then click *✅ Verify Access* to unlock!"
 )
 
 DEFAULT_HELP_MSG = (
-    "👑 💸 *MONEYZONE SUPPORT & GUIDE* 💸 👑\n"
-    "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
-    "🔹 *1. Join Channels:* Click the sponsor channel links & join.\n"
-    "🔹 *2. Click Verify:* Tap the *✅ VERIFY ACCESS* button.\n"
-    "🔹 *3. Claim Vouchers:* Tap *⚡ 🏃 CLAIM LENSKART VOUCHER*, enter your phone number & OTP.\n"
-    "🔹 *4. Refer & Earn:* Copy your unique referral link to build your team!\n\n"
-    "💬 *24/7 Admin Support Available!*"
+    "ℹ️ *LENSKART BOT HELP & GUIDE*\n\n"
+    "1️⃣ *Join Channels:* Join all required channels listed in the verify card.\n"
+    "2️⃣ *Verify:* Tap *✅ Verify Access* to confirm membership.\n"
+    "3️⃣ *Claim Reward:* Tap *🏃 Claim Reward* (Costs 20 Points). Enter your mobile number & OTP.\n"
+    "4️⃣ *Earn Points:* Share your referral link! Earn *50 Points* for every friend who joins!\n\n"
+    "💬 Contact admin for support.\n\n"
+    "⚡ *Created by MoneyZone*"
 )
 
 # ============= REFERRAL =============
@@ -57,4 +63,4 @@ ITEMS_PER_PAGE = 10
 
 # ============= RATE LIMITS & CACHE =============
 BROADCAST_DELAY = 0.05  # seconds between messages during broadcast
-CHANNEL_CACHE_TTL = 45  # cache channel membership check for 45s for ultra-fast performance
+CHANNEL_CACHE_TTL = 45  # cache channel membership check for 45s
