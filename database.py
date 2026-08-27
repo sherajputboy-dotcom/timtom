@@ -1,16 +1,85 @@
 #!/usr/bin/env python3
-"""Async SQLite Database Layer with High-Concurrency WAL Mode & Points System"""
+"""
+Async Database Layer — Dual Engine (PostgreSQL via Neon/Render & SQLite Local Fallback)
+Survives deployments and server restarts cleanly!
+"""
 
-import aiosqlite
+import os
+import re
 import logging
+import aiosqlite
+
+try:
+    import asyncpg
+except ImportError:
+    asyncpg = None
+
 from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-SCHEMA = """
+# Environment variable for Postgres (Neon / Render)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    user_id BIGINT PRIMARY KEY,
+    username TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    language_code TEXT DEFAULT 'en',
+    referred_by BIGINT,
+    referral_count INT DEFAULT 0,
+    points INT DEFAULT 20,
+    is_banned INT DEFAULT 0,
+    is_verified INT DEFAULT 0,
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS channels (
+    id SERIAL PRIMARY KEY,
+    channel_id BIGINT UNIQUE NOT NULL,
+    channel_username TEXT,
+    channel_title TEXT,
+    invite_link TEXT,
+    added_by BIGINT,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active INT DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS vouchers (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    phone TEXT NOT NULL,
+    voucher_code TEXT,
+    tier TEXT,
+    device_brand TEXT,
+    device_model TEXT,
+    expiry_date TIMESTAMP,
+    claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS broadcasts (
+    id SERIAL PRIMARY KEY,
+    admin_id BIGINT NOT NULL,
+    message_text TEXT,
+    total_users INT DEFAULT 0,
+    sent_count INT DEFAULT 0,
+    failed_count INT DEFAULT 0,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+SQLITE_SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA busy_timeout=5000;
-PRAGMA synchronous=NORMAL;
 
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -47,8 +116,7 @@ CREATE TABLE IF NOT EXISTS vouchers (
     device_brand TEXT,
     device_model TEXT,
     expiry_date TIMESTAMP,
-    claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS broadcasts (
@@ -70,61 +138,105 @@ CREATE TABLE IF NOT EXISTS settings (
 
 
 class Database:
-    """Async SQLite database for high-concurrency bot persistence."""
+    """Async Dual-Engine Database Manager (PostgreSQL & SQLite)."""
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DB_PATH
-        self._conn = None
-
-    async def _get_connection(self):
-        if self._conn is None:
-            self._conn = await aiosqlite.connect(self.db_path)
-            self._conn.row_factory = aiosqlite.Row
-            await self._conn.execute("PRAGMA journal_mode=WAL;")
-            await self._conn.execute("PRAGMA busy_timeout=5000;")
-            await self._conn.execute("PRAGMA synchronous=NORMAL;")
-        return self._conn
+        self.is_pg = False
+        self.pool = None
+        self._sqlite_conn = None
 
     async def init(self):
-        """Initialize database and create tables with WAL mode."""
-        conn = await self._get_connection()
-        await conn.executescript(SCHEMA)
-        # Migrate schema if points column missing
+        """Initialize connection pool (Neon Postgres if DATABASE_URL set, else SQLite)."""
+        dsn = DATABASE_URL
+        if dsn and asyncpg:
+            if dsn.startswith("postgres://"):
+                dsn = dsn.replace("postgres://", "postgresql://", 1)
+            try:
+                self.pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+                self.is_pg = True
+                async with self.pool.acquire() as conn:
+                    await conn.execute(PG_SCHEMA)
+                logger.info("🐘 Connected to Neon/Render PostgreSQL Database! Data is persistent.")
+                return
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL connection failed: {e}. Falling back to SQLite.")
+
+        # Fallback to SQLite
+        self.is_pg = False
+        self._sqlite_conn = await aiosqlite.connect(self.db_path)
+        self._sqlite_conn.row_factory = aiosqlite.Row
+        await self._sqlite_conn.executescript(SQLITE_SCHEMA)
         try:
-            await conn.execute("ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 20;")
-            await conn.commit()
+            await self._sqlite_conn.execute("ALTER TABLE users ADD COLUMN points INTEGER DEFAULT 20;")
+            await self._sqlite_conn.commit()
         except Exception:
-            pass  # Column already exists
-        logger.info("⚡ SQLite WAL mode & points system initialized.")
+            pass
+        logger.info("⚡ SQLite Database initialized (Local fallback mode).")
 
     async def close(self):
-        if self._conn:
-            await self._conn.close()
-            self._conn = None
+        if self.pool:
+            await self.pool.close()
+        if self._sqlite_conn:
+            await self._sqlite_conn.close()
+
+    def _convert_query(self, query: str) -> str:
+        """Convert SQLite ? placeholders to PostgreSQL $1, $2 if using Postgres."""
+        if not self.is_pg:
+            return query
+        count = 0
+        def repl(match):
+            nonlocal count
+            count += 1
+            return f"${count}"
+        pg_query = re.sub(r'\?', repl, query)
+        pg_query = pg_query.replace("INSERT OR REPLACE", "INSERT").replace("CURRENT_TIMESTAMP", "NOW()")
+        return pg_query
 
     async def _fetch_one(self, query: str, params: tuple = None) -> dict:
-        conn = await self._get_connection()
-        async with conn.execute(query, params or ()) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+        params = params or ()
+        if self.is_pg:
+            pg_q = self._convert_query(query)
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(pg_q, *params)
+                return dict(row) if row else None
+        else:
+            async with self._sqlite_conn.execute(query, params) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
     async def _fetch_all(self, query: str, params: tuple = None) -> list:
-        conn = await self._get_connection()
-        async with conn.execute(query, params or ()) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+        params = params or ()
+        if self.is_pg:
+            pg_q = self._convert_query(query)
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(pg_q, *params)
+                return [dict(r) for r in rows]
+        else:
+            async with self._sqlite_conn.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
 
     async def _execute(self, query: str, params: tuple = None) -> int:
-        conn = await self._get_connection()
-        async with conn.execute(query, params or ()) as cursor:
-            await conn.commit()
-            return cursor.lastrowid
+        params = params or ()
+        if self.is_pg:
+            if "INSERT INTO settings" in query:
+                pg_q = "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            else:
+                pg_q = self._convert_query(query)
+            async with self.pool.acquire() as conn:
+                res = await conn.execute(pg_q, *params)
+                return 1
+        else:
+            async with self._sqlite_conn.execute(query, params) as cursor:
+                await self._sqlite_conn.commit()
+                return cursor.lastrowid
 
     # ===================== USER & POINTS METHODS =====================
 
     async def add_user(self, user_id: int, username: str = None, first_name: str = None,
                        last_name: str = None, language_code: str = "en", referred_by: int = None) -> bool:
-        """Add new user. Gives 20 starting points. Referrer gets +50 points."""
+        """Add new user with 20 starting points."""
         existing = await self.get_user(user_id)
         if existing:
             await self._execute(
@@ -133,19 +245,11 @@ class Database:
             )
             return False
 
-        # Insert new user with 20 default points
         await self._execute(
             "INSERT INTO users (user_id, username, first_name, last_name, language_code, referred_by, points) "
             "VALUES (?, ?, ?, ?, ?, ?, 20)",
             (user_id, username, first_name, last_name, language_code, referred_by)
         )
-
-        # Referrer gets +1 referral count and +50 points bonus!
-        if referred_by:
-            await self._execute(
-                "UPDATE users SET referral_count = referral_count + 1, points = points + 50 WHERE user_id = ?",
-                (referred_by,)
-            )
         return True
 
     async def get_user(self, user_id: int) -> dict:
@@ -164,6 +268,33 @@ class Database:
             return False
         await self._execute("UPDATE users SET points = points - ? WHERE user_id = ?", (amount, user_id))
         return True
+
+    async def verify_user_and_reward_referrer(self, user_id: int) -> dict:
+        """
+        Mark user as verified. If user was referred by someone and hasn't been verified yet,
+        credit +50 points to the referrer and increment referral count.
+        Returns referrer info dict if reward was credited, else None.
+        """
+        user = await self.get_user(user_id)
+        if not user:
+            return None
+
+        already_verified = bool(user.get("is_verified", 0))
+        await self.set_verified(user_id, True)
+
+        if not already_verified and user.get("referred_by"):
+            referrer_id = user["referred_by"]
+            await self._execute(
+                "UPDATE users SET referral_count = referral_count + 1, points = points + 50 WHERE user_id = ?",
+                (referrer_id,)
+            )
+            ref_data = await self.get_user(referrer_id)
+            return {
+                "referrer_id": referrer_id,
+                "new_points": ref_data.get("points", 0) if ref_data else 0,
+                "total_referrals": ref_data.get("referral_count", 0) if ref_data else 0
+            }
+        return None
 
     async def update_last_active(self, user_id: int):
         await self._execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (user_id,))
@@ -326,6 +457,6 @@ class Database:
 
     async def set_setting(self, key: str, value: str):
         await self._execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            "INSERT INTO settings (key, value) VALUES (?, ?)",
             (key, str(value))
         )

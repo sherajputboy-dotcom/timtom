@@ -250,7 +250,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from handlers.user_menu import show_referrals
         await show_referrals(update, context)
         return True
-    elif text == "👤 My Profile":
+    elif text in ("👤 Profile", "👤 My Profile"):
         from handlers.user_menu import show_profile
         await show_profile(update, context)
         return True

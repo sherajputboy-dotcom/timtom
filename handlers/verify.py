@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Channel verification handler — Lenskart Reward Bot"""
+"""Channel verification handler — Lenskart Reward Bot (Super Referral Enabled)"""
 
 from telegram import Update
 from telegram.ext import ContextTypes
 from middleware.force_join import clear_user_membership_cache, is_user_channel_member
-from utils.keyboard import main_reply_keyboard, refresh_dashboard_keyboard, force_join_keyboard
-from config import CREDIT_FOOTER
+from utils.keyboard import main_reply_keyboard, force_join_keyboard
+from config import CREDIT_FOOTER, REFERRAL_BONUS_POINTS
 
 
 async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle ✅ Verify button — re-check all channel memberships cleanly."""
+    """Handle ✅ Verify button — re-check all channel memberships and award referral points."""
     query = update.callback_query
     user = update.effective_user
     db = context.bot_data["db"]
@@ -19,7 +19,23 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     channels = await db.get_channels()
     if not channels:
-        await db.set_verified(user.id, True)
+        ref_info = await db.verify_user_and_reward_referrer(user.id)
+        if ref_info:
+            try:
+                await context.bot.send_message(
+                    chat_id=ref_info["referrer_id"],
+                    text=(
+                        f"🎉 *REFERRAL VERIFIED!* 🎉\n\n"
+                        f"👤 *{user.first_name or 'Someone'}* completed channel verification!\n"
+                        f"💰 Bonus Awarded: *+{REFERRAL_BONUS_POINTS} Points*\n"
+                        f"📊 Total Referrals: `{ref_info['total_referrals']}`\n"
+                        f"💳 Your New Balance: `{ref_info['new_points']} Points`"
+                    ),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
         await query.answer("🎉 Verification Successful!", show_alert=True)
         points = await db.get_user_points(user.id)
         
@@ -65,7 +81,24 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
     else:
-        await db.set_verified(user.id, True)
+        # Mark verified & award referral points to referrer
+        ref_info = await db.verify_user_and_reward_referrer(user.id)
+        if ref_info:
+            try:
+                await context.bot.send_message(
+                    chat_id=ref_info["referrer_id"],
+                    text=(
+                        f"🎉 *REFERRAL VERIFIED!* 🎉\n\n"
+                        f"👤 *{user.first_name or 'Someone'}* completed channel verification!\n"
+                        f"💰 Bonus Awarded: *+{REFERRAL_BONUS_POINTS} Points*\n"
+                        f"📊 Total Referrals: `{ref_info['total_referrals']}`\n"
+                        f"💳 Your New Balance: `{ref_info['new_points']} Points`"
+                    ),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
         await query.answer("🎉 Verified! All channels joined!", show_alert=True)
         
         points = await db.get_user_points(user.id)
