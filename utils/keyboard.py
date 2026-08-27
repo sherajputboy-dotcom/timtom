@@ -15,12 +15,17 @@ def main_reply_keyboard() -> ReplyKeyboardMarkup:
 
 
 def refresh_dashboard_keyboard() -> InlineKeyboardMarkup:
-    """Sleek dashboard action button (Matches screenshot style)."""
+    """Sleek dashboard action button."""
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh Dashboard", callback_data="main_menu")],
         [InlineKeyboardButton("🏃 Claim Lenskart Voucher (20 Pts)", callback_data="user_claim")]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Alias for backwards compatibility across all handlers."""
+    return refresh_dashboard_keyboard()
 
 
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
