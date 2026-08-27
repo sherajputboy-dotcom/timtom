@@ -407,28 +407,59 @@ class Database:
     async def add_voucher(self, user_id: int, phone: str, voucher_code: str,
                           tier: str = None, device_brand: str = None,
                           device_model: str = None, expiry_date=None) -> int:
-        return await self._execute(
-            "INSERT INTO vouchers (user_id, phone, voucher_code, tier, device_brand, device_model, expiry_date) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, phone, voucher_code, tier, device_brand, device_model, expiry_date)
-        )
+        exp_dt = None
+        if expiry_date:
+            try:
+                if isinstance(expiry_date, (int, float)):
+                    exp_dt = datetime.fromtimestamp(expiry_date / 1000)
+                elif isinstance(expiry_date, str) and expiry_date.isdigit():
+                    exp_dt = datetime.fromtimestamp(int(expiry_date) / 1000)
+                elif isinstance(expiry_date, datetime):
+                    exp_dt = expiry_date
+            except Exception as e:
+                logger.error(f"Error parsing expiry_date {expiry_date}: {e}")
+                exp_dt = None
+
+        try:
+            return await self._execute(
+                "INSERT INTO vouchers (user_id, phone, voucher_code, tier, device_brand, device_model, expiry_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (int(user_id), str(phone), str(voucher_code), str(tier) if tier else None, str(device_brand) if device_brand else None, str(device_model) if device_model else None, exp_dt)
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to insert voucher into DB: {e}")
+            return 0
 
     async def get_user_vouchers(self, user_id: int) -> list:
-        return await self._fetch_all(
-            "SELECT * FROM vouchers WHERE user_id = ? ORDER BY claimed_at DESC", (user_id,)
-        )
+        try:
+            return await self._fetch_all(
+                "SELECT * FROM vouchers WHERE user_id = ? ORDER BY claimed_at DESC", (int(user_id),)
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch user vouchers for {user_id}: {e}")
+            return []
 
     async def get_total_vouchers(self) -> int:
-        row = await self._fetch_one("SELECT COUNT(*) as c FROM vouchers")
-        return row["c"] if row else 0
+        try:
+            row = await self._fetch_one("SELECT COUNT(*) as c FROM vouchers")
+            if row:
+                return int(row.get("c") or row.get("count") or 0)
+            return 0
+        except Exception as e:
+            logger.error(f"❌ Failed to count total vouchers: {e}")
+            return 0
 
     async def get_recent_vouchers(self, limit: int = 10) -> list:
-        return await self._fetch_all(
-            "SELECT v.*, u.username, u.first_name FROM vouchers v "
-            "LEFT JOIN users u ON v.user_id = u.user_id "
-            "ORDER BY v.claimed_at DESC LIMIT ?",
-            (limit,)
-        )
+        try:
+            return await self._fetch_all(
+                "SELECT v.*, u.username, u.first_name FROM vouchers v "
+                "LEFT JOIN users u ON v.user_id = u.user_id "
+                "ORDER BY v.claimed_at DESC LIMIT ?",
+                (limit,)
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch recent vouchers: {e}")
+            return []
 
     # ===================== BROADCAST METHODS =====================
 
