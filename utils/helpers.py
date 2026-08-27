@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
-"""Utility helpers — formatting, pagination, text charts"""
+"""Utility helpers — formatting, pagination, text charts, markdown escaping"""
 
 from datetime import datetime
+
+
+def escape_md(text: str) -> str:
+    """Escape Markdown special characters to prevent Telegram parse errors."""
+    if not text:
+        return ""
+    text_str = str(text)
+    for char in ["_", "*", "`", "[", "]"]:
+        text_str = text_str.replace(char, f"\\{char}")
+    return text_str
 
 
 def format_number(n: int) -> str:
@@ -32,7 +42,7 @@ def truncate(text: str, length: int = 50) -> str:
 
 def mention_user(user_id: int, name: str = None) -> str:
     """Create Telegram mention link."""
-    display = name or str(user_id)
+    display = escape_md(name or str(user_id))
     return f"[{display}](tg://user?id={user_id})"
 
 

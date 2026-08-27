@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from config import ADMIN_IDS, DEFAULT_HELP_MSG, CREDIT_FOOTER, REFERRAL_BONUS_POINTS, CLAIM_COST_POINTS
 from middleware.force_join import require_join
 from utils.keyboard import main_menu_keyboard, back_button
-from utils.helpers import format_number, format_datetime, mention_user
+from utils.helpers import format_number, format_datetime, mention_user, escape_md
 
 
 @require_join
@@ -36,25 +36,35 @@ async def show_main_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     db = context.bot_data["db"]
     points = await db.get_user_points(user.id)
+    safe_name = escape_md(user.first_name or 'User')
 
     text = (
         f"🕶️ *LENSKART BOT DASHBOARD* 🕶️\n\n"
-        f"👑 *Welcome back, {user.first_name or 'User'}!*\n"
+        f"👑 *Welcome back, {safe_name}!*\n"
         f"💰 *Points Balance:* `{points} Points`\n"
         f"🏃 *Claim Cost:* `{CLAIM_COST_POINTS} Points`\n\n"
         f"Select an option below:\n\n{CREDIT_FOOTER}"
     )
-    await query.edit_message_text(
-        text, reply_markup=main_menu_keyboard(), parse_mode="Markdown"
-    )
+    await _reply_or_edit(update, text, reply_markup=main_menu_keyboard())
 
 
 async def _reply_or_edit(update: Update, text: str, reply_markup=None):
-    """Helper to send message via edit_message (callback) or reply_text (message)."""
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-    elif update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    """Helper to send message via edit_message or reply_text with safety markdown fallback."""
+    try:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        elif update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception:
+        # Fallback to plain text if Telegram fails to parse entities
+        try:
+            clean_text = text.replace("*", "").replace("`", "")
+            if update.callback_query:
+                await update.callback_query.edit_message_text(clean_text, reply_markup=reply_markup)
+            elif update.message:
+                await update.message.reply_text(clean_text, reply_markup=reply_markup)
+        except Exception:
+            pass
 
 
 @require_join
@@ -73,11 +83,14 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = (await context.bot.get_me()).username
     ref_link = f"https://t.me/{bot_username}?start=ref_{user.id}"
 
+    safe_first = escape_md(data.get('first_name') or 'User')
+    safe_username = escape_md(data.get('username') or 'N/A')
+
     text = (
         f"👤 *YOUR PROFILE*\n\n"
         f"🆔 *User ID:* `{user.id}`\n"
-        f"👤 *Name:* `{data.get('first_name', 'User')}`\n"
-        f"📛 *Username:* @{data.get('username') or 'N/A'}\n"
+        f"👤 *Name:* `{safe_first}`\n"
+        f"📛 *Username:* @{safe_username}\n"
         f"💳 *Points Balance:* `{points} Points`\n"
         f"👥 *Total Referrals:* `{format_number(data.get('referral_count', 0))}`\n"
         f"🎁 *Vouchers Claimed:* `{len(vouchers)}`\n"
@@ -112,7 +125,7 @@ async def show_referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if referrals:
         text += "\n👥 *Recent Referrals:*\n"
         for i, ref in enumerate(referrals, 1):
-            name = ref.get('first_name') or 'User'
+            name = escape_md(ref.get('first_name') or 'User')
             text += f"  {i}. {mention_user(ref['user_id'], name)} — `{format_datetime(ref.get('joined_at'))}`\n"
     else:
         text += "\n💡 *No referrals yet.* Share your link to get free Points!"
@@ -139,7 +152,8 @@ async def show_vouchers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = f"🎁 *MY VOUCHERS* ({len(vouchers)})\n\n"
         for i, v in enumerate(vouchers, 1):
-            text += f"🎫 *Voucher #{i}:* `{v.get('voucher_code', 'N/A')}`\n"
+            code = escape_md(v.get('voucher_code', 'N/A'))
+            text += f"🎫 *Voucher #{i}:* `{code}`\n"
             text += f"   📱 Phone: `{v.get('phone', 'N/A')}`\n"
             if v.get('tier'):
                 text += f"   🏆 Tier: `{v['tier']}`\n"
@@ -163,7 +177,7 @@ async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 *TOP REFERRERS LEADERBOARD*\n\n"
         for i, user_data in enumerate(top):
             medal = medals[i] if i < len(medals) else "🏅"
-            name = user_data.get('first_name') or 'User'
+            name = escape_md(user_data.get('first_name') or 'User')
             count = user_data.get('referral_count', 0)
             pts = user_data.get('points', 0)
             text += f"{medal} {mention_user(user_data['user_id'], name)} — `{format_number(count)}` refs (`{pts} Pts`)\n"
