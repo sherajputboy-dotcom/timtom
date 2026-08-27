@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS, REFERRAL_PREFIX, DEFAULT_WELCOME_MSG, CREDIT_FOOTER, REFERRAL_BONUS_POINTS
 from middleware.force_join import is_user_channel_member
-from utils.keyboard import main_menu_keyboard, main_reply_keyboard, force_join_keyboard
+from utils.keyboard import main_reply_keyboard, refresh_dashboard_keyboard, force_join_keyboard
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,7 +81,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is_new: bool = False):
-    """Display the Lenskart Bot main menu with reply & inline keyboards."""
+    """Display the Lenskart Bot main menu with reply keyboard."""
     user = update.effective_user
     db = context.bot_data["db"]
 
@@ -89,20 +89,16 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is
     name = user.first_name or "User"
     points = await db.get_user_points(user.id)
 
-    # First send reply keyboard (bottom menu)
-    await update.message.reply_text(
-        f"📱 Main Menu Activated!",
-        reply_markup=main_reply_keyboard()
-    )
-
-    # Send clean inline dashboard card
+    # Clean single message attaching reply keyboard and sleek refresh button
     text = (
         f"{greeting}, *{name}*! 🕶️\n\n"
-        f"💰 *Your Points Balance:* `{points} Points`\n"
+        f"💳 *Points Balance:* `{points} Points`\n"
         f"🏃 *Cost Per Claim:* `20 Points`\n\n"
-        f"Choose an option below to bypass 30,000 steps and claim your Lenskart voucher!\n\n"
+        f"Use the bottom menu buttons to navigate!\n\n"
         f"{CREDIT_FOOTER}"
     )
     await update.message.reply_text(
-        text, reply_markup=main_menu_keyboard(), parse_mode="Markdown"
+        text,
+        reply_markup=main_reply_keyboard(),
+        parse_mode="Markdown"
     )

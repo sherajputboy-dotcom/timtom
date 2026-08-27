@@ -4,7 +4,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from middleware.force_join import clear_user_membership_cache, is_user_channel_member
-from utils.keyboard import main_menu_keyboard, main_reply_keyboard, force_join_keyboard
+from utils.keyboard import main_reply_keyboard, refresh_dashboard_keyboard, force_join_keyboard
 from config import CREDIT_FOOTER
 
 
@@ -22,13 +22,21 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.set_verified(user.id, True)
         await query.answer("🎉 Verification Successful!", show_alert=True)
         points = await db.get_user_points(user.id)
+        
         await query.edit_message_text(
             f"✅ *Verification Complete!* 🎉\n\n"
             f"💰 *Your Balance:* `{points} Points`\n\n"
-            f"Select an option below:\n\n{CREDIT_FOOTER}",
-            reply_markup=main_menu_keyboard(),
+            f"Use the bottom menu to navigate!\n\n{CREDIT_FOOTER}",
             parse_mode="Markdown"
         )
+        try:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text="📱 Menu Unlocked!",
+                reply_markup=main_reply_keyboard()
+            )
+        except Exception:
+            pass
         return
 
     not_joined = []
@@ -49,7 +57,7 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         for name in names:
             text += f"  🔴 `{name}`\n"
-        text += "\nClick the channel buttons above to join, then tap *✅ Verify Access* again."
+        text += "\nClick the channel buttons above to join, then tap *🔄 Refresh / Verify Status* again."
 
         markup = force_join_keyboard(channels, joined_ids)
         try:
@@ -60,7 +68,15 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.set_verified(user.id, True)
         await query.answer("🎉 Verified! All channels joined!", show_alert=True)
         
-        # Send reply keyboard
+        points = await db.get_user_points(user.id)
+        await query.edit_message_text(
+            f"🕶️ *LENSKART BOT DASHBOARD* 🕶️\n\n"
+            f"🎉 *Welcome, {user.first_name or 'User'}!*\n"
+            f"💳 *Points Balance:* `{points} Points`\n"
+            f"🏃 *Claim Cost:* `20 Points`\n\n"
+            f"Use the bottom menu to navigate!\n\n{CREDIT_FOOTER}",
+            parse_mode="Markdown"
+        )
         try:
             await context.bot.send_message(
                 chat_id=user.id,
@@ -69,14 +85,3 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
-
-        points = await db.get_user_points(user.id)
-        await query.edit_message_text(
-            f"🕶️ *LENSKART BOT DASHBOARD* 🕶️\n\n"
-            f"🎉 *Welcome, {user.first_name or 'User'}!*\n"
-            f"💰 *Points Balance:* `{points} Points`\n"
-            f"🏃 *Claim Cost:* `20 Points`\n\n"
-            f"Select an option from the menu below:\n\n{CREDIT_FOOTER}",
-            reply_markup=main_menu_keyboard(),
-            parse_mode="Markdown"
-        )
