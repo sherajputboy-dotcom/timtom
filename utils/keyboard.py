@@ -28,6 +28,15 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     return refresh_dashboard_keyboard()
 
 
+def claim_result_keyboard() -> InlineKeyboardMarkup:
+    """Inline keyboard for claim result card with instant Run Again button."""
+    keyboard = [
+        [InlineKeyboardButton("🔄 🏃 RUN AGAIN / CLAIM ANOTHER", callback_data="user_claim")],
+        [InlineKeyboardButton("🎁 My Voucher Vault", callback_data="user_vouchers")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
     """Admin Panel Main Menu."""
     keyboard = [

@@ -2,11 +2,12 @@
 """Lenskart reward claiming handlers — OTP flow, reward claim, voucher check & points deduction"""
 
 import asyncio
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from middleware.force_join import require_join
 from utils.device import LenskartDevice
-from utils.keyboard import main_menu_keyboard, back_button
+from utils.keyboard import main_menu_keyboard, back_button, claim_result_keyboard
 from config import DEFAULT_STEPS, CLAIM_COST_POINTS, CREDIT_FOOTER
 
 # In-memory pending OTP store
@@ -178,14 +179,26 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     steps = int(await db.get_setting("claim_steps", str(DEFAULT_STEPS)))
     reward = device.claim_reward(steps=steps)
 
-    if reward and reward.get("giftVoucher"):
-        voucher_code = reward.get("giftVoucher")
-        tier = reward.get("tier")
-        expiry = reward.get("giftVoucherExpiryDate")
+    if reward and (reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")):
+        voucher_code = reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")
+        tier = reward.get("tier") or reward.get("voucherTier")
+        expiry = reward.get("giftVoucherExpiryDate") or reward.get("expiryDate")
 
         # Deduct 20 points from user balance
         await db.deduct_points(user.id, CLAIM_COST_POINTS)
         new_balance = await db.get_user_points(user.id)
+
+        # Format expiry date
+        exp_formatted = "N/A"
+        if expiry:
+            try:
+                if isinstance(expiry, (int, float)):
+                    exp_dt = datetime.fromtimestamp(expiry / 1000)
+                    exp_formatted = exp_dt.strftime("%d %b %Y")
+                else:
+                    exp_formatted = str(expiry)
+            except Exception:
+                exp_formatted = str(expiry)
 
         # Save voucher to DB
         await db.add_voucher(
@@ -199,32 +212,43 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         text = (
-            f"🎉 *REWARD CLAIMED SUCCESSFULLY!* 🎉\n\n"
-            f"📱 Phone: `{phone}`\n"
-            f"🎫 Voucher Code: `{voucher_code}`\n"
+            f"🎉 🎁 *LENSKART REWARD CLAIMED!* 🎁 🎉\n"
+            f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+            f"🎫 *VOUCHER CODE:*\n"
+            f"`{voucher_code}`\n"
+            f"_(Tap code above to copy!)\n\n"
+            f"📋 *CLAIM DETAILS:*\n"
+            f"📱 *Phone:* `{phone}`\n"
         )
         if tier:
-            text += f"🏆 Tier: `{tier}`\n"
+            text += f"🏆 *Reward Tier:* `{tier}`\n"
+        if exp_formatted != "N/A":
+            text += f"⏰ *Expiry Date:* `{exp_formatted}`\n"
         text += (
-            f"📱 Device: `{device.device_info}`\n"
-            f"💳 Remaining Balance: `{new_balance} Points`\n\n"
-            f"✅ Saved to your Voucher Vault!\n\n"
+            f"📱 *Device Spoofed:* `{device.device_info}`\n"
+            f"🆔 *UDID:* `{device.udid}`\n\n"
+            f"💳 *Remaining Balance:* `{new_balance} Points`\n"
+            f"✅ *Saved to your Voucher Vault!*\n\n"
             f"{CREDIT_FOOTER}"
         )
 
         await update.message.reply_text(
-            text, reply_markup=main_menu_keyboard(), parse_mode="Markdown"
+            text, reply_markup=claim_result_keyboard(), parse_mode="Markdown"
         )
     else:
-        err = device.last_error or "Voucher claim rejected"
+        err = device.last_error or "Voucher claim rejected by Lenskart API"
+        text = (
+            f"❌ *CLAIM FAILED FOR `{phone}`*\n"
+            f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+            f"⚠️ *Details / API Response:*\n"
+            f"`{err}`\n\n"
+            f"💡 *Possible Causes:*\n"
+            f"• Reward already claimed today for this mobile number\n"
+            f"• Lenskart daily campaign stock limit reached\n\n"
+            f"{CREDIT_FOOTER}"
+        )
         await update.message.reply_text(
-            f"❌ *Failed to claim voucher for `{phone}`*\n\n"
-            f"Details: `{err}`\n\n"
-            f"Possible reasons:\n"
-            f"• Already claimed today on this account\n"
-            f"• Lenskart campaign limit reached",
-            reply_markup=main_menu_keyboard(),
-            parse_mode="Markdown"
+            text, reply_markup=claim_result_keyboard(), parse_mode="Markdown"
         )
 
     # Cleanup
@@ -239,7 +263,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message and update.message.text else ""
 
     # Check for Reply Keyboard button triggers
-    if text == "🏃 Claim Reward":
+    if text in ("🏃 Claim Reward", "🏃 Claim Reward (20 Pts)"):
         await claim_callback(update, context)
         return True
     elif text == "🎁 My Vouchers":
