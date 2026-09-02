@@ -262,6 +262,9 @@ class Database:
     async def add_points(self, user_id: int, amount: int = 50):
         await self._execute("UPDATE users SET points = points + ? WHERE user_id = ?", (amount, user_id))
 
+    async def add_points_all(self, amount: int):
+        await self._execute("UPDATE users SET points = points + ? WHERE is_banned = 0", (amount,))
+
     async def deduct_points(self, user_id: int, amount: int = 20) -> bool:
         points = await self.get_user_points(user_id)
         if points < amount:

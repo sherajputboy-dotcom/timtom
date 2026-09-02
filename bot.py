@@ -25,7 +25,7 @@ from handlers.start import start_command
 from handlers.verify import verify_callback
 from handlers.user_menu import menu_callback
 from handlers.lenskart import claim_callback, handle_text_input as lenskart_text
-from handlers.admin import admin_command, admin_callback, admin_text_handler
+from handlers.admin import admin_command, admin_callback, admin_text_handler, addpoints_command
 
 # Logging
 logging.basicConfig(
@@ -213,6 +213,7 @@ def main():
     # Register handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler(["addpoints", "addcredits"], addpoints_command))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

@@ -115,6 +115,7 @@ def user_action_keyboard(user_id: int, is_banned: bool) -> InlineKeyboardMarkup:
     )
     keyboard = [
         [ban_btn],
+        [InlineKeyboardButton("💰 Give Credits (Points)", callback_data=f"admin_user_credits_{user_id}")],
         [InlineKeyboardButton("👥 Referrals", callback_data=f"admin_user_refs_{user_id}")],
         [InlineKeyboardButton("🎫 Vouchers", callback_data=f"admin_user_vouchers_{user_id}")],
         [InlineKeyboardButton("🔙 Back to Users", callback_data="admin_users")]

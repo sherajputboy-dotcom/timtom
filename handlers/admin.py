@@ -101,6 +101,27 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer(f"✅ User {target_id} unbanned!", show_alert=True)
         await _show_user_detail(query, db, target_id)
 
+    elif data.startswith("admin_user_credits_"):
+        target_id = int(data.split("_")[-1])
+        context.user_data["admin_action"] = f"give_credits_{target_id}"
+        await query.edit_message_text(
+            f"💰 *Give Credits (Points)*\n\n"
+            f"👤 Target User: `{target_id}`\n\n"
+            f"Send the number of Points to add (e.g. `50` or `100`):",
+            reply_markup=back_button(f"admin_view_{target_id}"),
+            parse_mode="Markdown"
+        )
+
+    elif data == "admin_credits_all":
+        context.user_data["admin_action"] = "give_credits_all"
+        await query.edit_message_text(
+            "💰 *Give Credits to ALL Users*\n\n"
+            "Send the number of Points to gift to EVERY active user (e.g. `50` or `100`):\n\n"
+            "⚠️ All active users will receive a instant notification!",
+            reply_markup=back_button("admin_users"),
+            parse_mode="Markdown"
+        )
+
     elif data.startswith("admin_user_refs_"):
         target_id = int(data.split("_")[-1])
         await _show_user_referrals(query, db, target_id)
@@ -265,6 +286,76 @@ async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ Invalid number! Must be a positive integer.")
         return True
 
+    elif action.startswith("give_credits_"):
+        if not text.isdigit() or int(text) <= 0:
+            await update.message.reply_text("❌ Invalid amount! Send a positive number of points.")
+            return True
+
+        pts = int(text)
+        if action == "give_credits_all":
+            await db.add_points_all(pts)
+            user_ids = await db.get_all_user_ids()
+            await update.message.reply_text(
+                f"⏳ Crediting +{pts} Points to all `{len(user_ids)}` users and sending notifications...",
+                parse_mode="Markdown"
+            )
+            sent = 0
+            for uid in user_ids:
+                try:
+                    new_bal = await db.get_user_points(uid)
+                    await context.bot.send_message(
+                        chat_id=uid,
+                        text=(
+                            f"🎁 *BONUS CREDITS RECEIVED!* 🎉\n\n"
+                            f"💰 Admin credited *+{pts} Bonus Points* to your account!\n"
+                            f"💳 *Your New Balance:* `{new_bal} Points`\n\n"
+                            f"🏃 Use your points to claim Lenskart vouchers now!"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                    sent += 1
+                except Exception:
+                    pass
+                await asyncio.sleep(BROADCAST_DELAY)
+
+            await update.message.reply_text(
+                f"✅ *Global Credits Completed!*\n\n"
+                f"💰 Credited: `+{pts} Points`\n"
+                f"📩 Users Notified: `{sent}/{len(user_ids)}`",
+                reply_markup=back_button("admin_users"),
+                parse_mode="Markdown"
+            )
+        else:
+            target_id = int(action.replace("give_credits_", ""))
+            await db.add_points(target_id, pts)
+            new_bal = await db.get_user_points(target_id)
+
+            try:
+                await context.bot.send_message(
+                    chat_id=target_id,
+                    text=(
+                        f"🎁 *BONUS CREDITS RECEIVED!* 🎉\n\n"
+                        f"💰 Admin credited *+{pts} Points* to your account!\n"
+                        f"💳 *Your New Balance:* `{new_bal} Points`\n\n"
+                        f"🏃 Use your points to claim Lenskart vouchers now!"
+                    ),
+                    parse_mode="Markdown"
+                )
+                notified = "✅ User notified!"
+            except Exception:
+                notified = "⚠️ User could not be notified."
+
+            await update.message.reply_text(
+                f"✅ *Credits Granted!*\n\n"
+                f"👤 User ID: `{target_id}`\n"
+                f"💰 Points Added: `+{pts}`\n"
+                f"💳 New Balance: `{new_bal} Points`\n"
+                f"{notified}",
+                reply_markup=user_action_keyboard(target_id, False),
+                parse_mode="Markdown"
+            )
+        return True
+
     elif action == "set_welcome":
         await db.set_setting("welcome_msg", text)
         await update.message.reply_text(
@@ -360,6 +451,7 @@ async def _show_users_menu(query):
     keyboard = [
         [InlineKeyboardButton("🔍 Search User", callback_data="admin_users_search")],
         [InlineKeyboardButton("📋 User List", callback_data="admin_users_list_1")],
+        [InlineKeyboardButton("💰 Bonus Credits to ALL Users", callback_data="admin_credits_all")],
         [InlineKeyboardButton("🚫 Banned Users", callback_data="admin_users_banned")],
         [InlineKeyboardButton("🔙 Back", callback_data="admin_main")]
     ]
@@ -768,3 +860,95 @@ async def _show_settings_menu(query, db):
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
+
+
+# ===================== COMMAND SHORTCUTS =====================
+
+@admin_only
+async def addpoints_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command shortcut: /addpoints <user_id|all> <amount>"""
+    db = context.bot_data["db"]
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "ℹ️ *Usage:*\n\n"
+            "• `/addpoints <user_id> <amount>` (e.g. `/addpoints 123456789 50`)\n"
+            "• `/addpoints all <amount>` (e.g. `/addpoints all 100`)",
+            parse_mode="Markdown"
+        )
+        return
+
+    target = args[0].lower()
+    try:
+        pts = int(args[1])
+        if pts <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ Invalid points amount! Must be a positive integer.")
+        return
+
+    if target == "all":
+        await db.add_points_all(pts)
+        user_ids = await db.get_all_user_ids()
+        await update.message.reply_text(
+            f"⏳ Crediting +{pts} Points to all `{len(user_ids)}` users and sending notifications...",
+            parse_mode="Markdown"
+        )
+        sent = 0
+        for uid in user_ids:
+            try:
+                new_bal = await db.get_user_points(uid)
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=(
+                        f"🎁 *BONUS CREDITS RECEIVED!* 🎉\n\n"
+                        f"💰 Admin credited *+{pts} Bonus Points* to your account!\n"
+                        f"💳 *Your New Balance:* `{new_bal} Points`\n\n"
+                        f"🏃 Use your points to claim Lenskart vouchers now!"
+                    ),
+                    parse_mode="Markdown"
+                )
+                sent += 1
+            except Exception:
+                pass
+            await asyncio.sleep(BROADCAST_DELAY)
+
+        await update.message.reply_text(
+            f"✅ *Global Credits Completed!*\n\n"
+            f"💰 Credited: `+{pts} Points`\n"
+            f"📩 Users Notified: `{sent}/{len(user_ids)}`",
+            parse_mode="Markdown"
+        )
+    else:
+        try:
+            target_id = int(target)
+        except ValueError:
+            await update.message.reply_text("❌ Invalid user ID!")
+            return
+
+        await db.add_points(target_id, pts)
+        new_bal = await db.get_user_points(target_id)
+
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text=(
+                    f"🎁 *BONUS CREDITS RECEIVED!* 🎉\n\n"
+                    f"💰 Admin credited *+{pts} Points* to your account!\n"
+                    f"💳 *Your New Balance:* `{new_bal} Points`\n\n"
+                    f"🏃 Use your points to claim Lenskart vouchers now!"
+                ),
+                parse_mode="Markdown"
+            )
+            notified = "✅ User notified!"
+        except Exception:
+            notified = "⚠️ User could not be notified."
+
+        await update.message.reply_text(
+            f"✅ *Credits Granted!*\n\n"
+            f"👤 User ID: `{target_id}`\n"
+            f"💰 Points Added: `+{pts}`\n"
+            f"💳 New Balance: `{new_bal} Points`\n"
+            f"{notified}",
+            parse_mode="Markdown"
+        )
