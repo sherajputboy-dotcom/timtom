@@ -215,7 +215,7 @@ def main():
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler(["addpoints", "addcredits"], addpoints_command))
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(~filters.COMMAND, handle_message))
 
     print("\n✅ Lenskart Bot Started! High-Concurrency mode ACTIVE.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

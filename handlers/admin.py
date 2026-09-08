@@ -2,8 +2,12 @@
 """Admin panel — full dashboard with stats, users, channels, broadcast, campaign, settings"""
 
 import asyncio
+import logging
+import telegram.error
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+
+logger = logging.getLogger(__name__)
 from config import ADMIN_IDS, ITEMS_PER_PAGE, BROADCAST_DELAY, DEFAULT_STEPS
 from utils.keyboard import (
     admin_menu_keyboard, back_button, pagination_keyboard,
@@ -165,8 +169,11 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["admin_action"] = "broadcast"
         await query.edit_message_text(
             "📣 *Broadcast Message*\n\n"
-            "Send the message you want to broadcast to all users:\n\n"
-            "⚠️ This will send to ALL non-banned users.",
+            "Send or forward ANY message you want to broadcast:\n"
+            "• Text with formatting, links & usernames\n"
+            "• Photos / Images with captions\n"
+            "• Videos, documents, or stickers\n\n"
+            "⚠️ This will copy & broadcast to ALL active users.",
             reply_markup=back_button("admin_broadcast"),
             parse_mode="Markdown"
         )
@@ -271,7 +278,7 @@ async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return True
 
     elif action == "broadcast":
-        await _handle_broadcast(update, context, db, text)
+        await _handle_broadcast(update, context, db)
         return True
 
     elif action == "set_steps":
@@ -716,43 +723,69 @@ async def _show_broadcast_menu(query):
     )
 
 
-async def _handle_broadcast(update: Update, context, db, text: str):
-    """Execute broadcast to all users."""
+async def _handle_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, db):
+    """Execute broadcast of ANY message type (text, photo, video, document, link) with FloodWait handling."""
+    msg = update.message
+    admin_chat_id = msg.chat_id
+    broadcast_msg_id = msg.message_id
+
+    # Create summary text for DB log
+    msg_summary = msg.text or msg.caption or "[Media Message]"
+
     user_ids = await db.get_all_user_ids()
     total = len(user_ids)
 
     if total == 0:
-        await update.message.reply_text("❌ No users to broadcast to!")
+        await msg.reply_text("❌ No active users to broadcast to!")
         return
 
     broadcast_id = await db.add_broadcast(
         admin_id=update.effective_user.id,
-        message_text=text,
+        message_text=msg_summary[:200],
         total_users=total
     )
 
-    status_msg = await update.message.reply_text(
-        f"📣 *Broadcasting...*\n\n{progress_bar(0, total)}\n"
+    status_msg = await msg.reply_text(
+        f"📣 *Broadcasting Message...*\n\n{progress_bar(0, total)}\n"
         f"Sent: `0/{total}`",
         parse_mode="Markdown"
     )
 
     sent = 0
     failed = 0
-    for i, uid in enumerate(user_ids):
-        try:
-            await context.bot.send_message(
-                chat_id=uid, text=text, parse_mode="Markdown"
-            )
-            sent += 1
-        except Exception:
-            failed += 1
 
-        # Update progress every 25 users
-        if (i + 1) % 25 == 0 or i == total - 1:
+    for i, uid in enumerate(user_ids):
+        success = False
+        attempts = 0
+        while attempts < 3 and not success:
+            try:
+                await context.bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=admin_chat_id,
+                    message_id=broadcast_msg_id
+                )
+                sent += 1
+                success = True
+            except telegram.error.RetryAfter as e:
+                # Handle Telegram FloodWait rate limit gracefully
+                wait_time = e.retry_after + 1
+                logger.warning(f"FloodWait hit during broadcast: sleeping for {wait_time}s")
+                await asyncio.sleep(wait_time)
+                attempts += 1
+            except (telegram.error.Forbidden, telegram.error.BadRequest) as e:
+                # User blocked bot or deleted account
+                failed += 1
+                break
+            except Exception as e:
+                logger.error(f"Failed to copy message to {uid}: {e}")
+                failed += 1
+                break
+
+        # Update status every 15 users or on final user
+        if (i + 1) % 15 == 0 or i == total - 1:
             try:
                 await status_msg.edit_text(
-                    f"📣 *Broadcasting...*\n\n{progress_bar(i + 1, total)}\n"
+                    f"📣 *Broadcasting Message...*\n\n{progress_bar(i + 1, total)}\n"
                     f"Sent: `{sent}` | Failed: `{failed}` | Total: `{total}`",
                     parse_mode="Markdown"
                 )
@@ -764,10 +797,10 @@ async def _handle_broadcast(update: Update, context, db, text: str):
     await db.update_broadcast(broadcast_id, sent, failed)
 
     await status_msg.edit_text(
-        f"✅ *Broadcast Complete!*\n\n"
+        f"✅ *Broadcast Completed Successfully!*\n\n"
         f"📨 Sent: `{sent}`\n"
-        f"❌ Failed: `{failed}`\n"
-        f"👥 Total: `{total}`",
+        f"❌ Failed (Blocked/Deleted): `{failed}`\n"
+        f"👥 Total Target Users: `{total}`",
         reply_markup=back_button("admin_broadcast"),
         parse_mode="Markdown"
     )
