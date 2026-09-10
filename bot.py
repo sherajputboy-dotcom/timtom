@@ -23,7 +23,10 @@ from database import Database
 # Handlers
 from handlers.start import start_command
 from handlers.verify import verify_callback
-from handlers.user_menu import menu_callback
+from handlers.user_menu import (
+    menu_callback, show_profile, show_referrals,
+    show_vouchers, show_leaderboard, show_help
+)
 from handlers.lenskart import claim_callback, handle_text_input as lenskart_text
 from handlers.admin import admin_command, admin_callback, admin_text_handler, addpoints_command
 
@@ -92,7 +95,18 @@ def keep_alive_worker():
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route all text messages (including persistent reply keyboard buttons)."""
     user = update.effective_user
-    if not user:
+    if not user or not update.message:
+        return
+
+    text = (update.message.text or "").strip()
+
+    # Cancel command check
+    if text.lower() in ("/cancel", "cancel", "❌ cancel"):
+        context.user_data["action"] = None
+        context.user_data["admin_action"] = None
+        context.user_data["pending_phone"] = None
+        from utils.keyboard import main_reply_keyboard
+        await update.message.reply_text("❌ Action cancelled.", reply_markup=main_reply_keyboard())
         return
 
     # Admin text input
@@ -108,11 +122,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result:
         return
 
-    # Unrecognized text
+    # Unrecognized text fallback with main reply keyboard
+    from utils.keyboard import main_reply_keyboard
     await update.message.reply_text(
         "🕶️ *LENSKART REWARD BOT*\n\n"
         "🤔 Command not recognized.\n"
         "Press /start or tap a button from the menu below!",
+        reply_markup=main_reply_keyboard(),
         parse_mode="Markdown"
     )
 
@@ -214,6 +230,12 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler(["addpoints", "addcredits"], addpoints_command))
+    application.add_handler(CommandHandler(["claim", "run"], claim_callback))
+    application.add_handler(CommandHandler(["vouchers", "myvouchers", "vault"], show_vouchers))
+    application.add_handler(CommandHandler(["refer", "referral", "ref"], show_referrals))
+    application.add_handler(CommandHandler(["profile", "me", "points", "balance"], show_profile))
+    application.add_handler(CommandHandler(["leaderboard", "top"], show_leaderboard))
+    application.add_handler(CommandHandler(["help", "info"], show_help))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(~filters.COMMAND, handle_message))
 
