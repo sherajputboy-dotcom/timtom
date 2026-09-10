@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start handler — registration, referral tracking, points bonus, persistent reply keyboard (State Safe)"""
+"""Start handler — registration, referral tracking, points bonus, persistent reply keyboard (State Safe & Multi-Update Compatible)"""
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -12,6 +12,9 @@ from utils.helpers import escape_md
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with optional referral deep link."""
     user = update.effective_user
+    if not user:
+        return
+
     db = context.bot_data["db"]
 
     # Reset any active action state
@@ -80,16 +83,30 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 welcome = welcome.replace("{bot_name}", escape_md(bot_me.first_name))
 
             markup = force_join_keyboard(channels, joined_ids)
-            try:
-                await update.message.reply_text(welcome, reply_markup=markup, parse_mode="Markdown")
-            except Exception:
-                clean_welcome = welcome.replace("*", "").replace("`", "")
-                await update.message.reply_text(clean_welcome, reply_markup=markup)
+            await _reply_or_send(update, welcome, reply_markup=markup)
             return
 
     # All channels joined
     await db.set_verified(user.id, True)
     await _show_main_menu(update, context, is_new)
+
+
+async def _reply_or_send(update: Update, text: str, reply_markup=None):
+    """Safely reply or send message regardless of update type."""
+    try:
+        if update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        elif update.callback_query and update.callback_query.message:
+            await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception:
+        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
+        try:
+            if update.message:
+                await update.message.reply_text(clean, reply_markup=reply_markup, parse_mode=None)
+            elif update.callback_query and update.callback_query.message:
+                await update.callback_query.message.reply_text(clean, reply_markup=reply_markup, parse_mode=None)
+        except Exception:
+            pass
 
 
 async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is_new: bool = False):
@@ -108,17 +125,4 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is
         f"Use the bottom menu buttons to navigate!\n\n"
         f"{CREDIT_FOOTER}"
     )
-    try:
-        await update.message.reply_text(
-            text,
-            reply_markup=main_reply_keyboard(),
-            parse_mode="Markdown"
-        )
-    except Exception:
-        await update.message.reply_text(
-            f"{greeting}, {user.first_name or 'User'}!\n\n"
-            f"Points Balance: {points} Points\n"
-            f"Cost Per Claim: 20 Points\n\n"
-            f"Use the bottom menu buttons to navigate!",
-            reply_markup=main_reply_keyboard()
-        )
+    await _reply_or_send(update, text, reply_markup=main_reply_keyboard())

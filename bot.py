@@ -100,7 +100,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (update.message.text or "").strip()
 
-    # Cancel command check
+    # Direct check for /start command
+    if text.lower().startswith("/start"):
+        context.args = text.split()[1:] if len(text.split()) > 1 else []
+        await start_command(update, context)
+        return
+
+    # Direct check for /cancel command
     if text.lower() in ("/cancel", "cancel", "❌ cancel"):
         context.user_data["action"] = None
         context.user_data["admin_action"] = None
