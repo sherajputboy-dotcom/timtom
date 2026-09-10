@@ -5,11 +5,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 
 
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
-    """Persistent bottom menu reply keyboard (Primary Navigation)."""
+    """Vibrant & Colorful persistent bottom menu reply keyboard (Primary Navigation)."""
     keyboard = [
-        [KeyboardButton("🏃 Claim Reward"), KeyboardButton("🎁 My Vouchers")],
-        [KeyboardButton("👥 Refer & Earn"), KeyboardButton("👤 My Profile")],
-        [KeyboardButton("🏆 Leaderboard"), KeyboardButton("ℹ️ Help")]
+        [KeyboardButton("⚡ 🏃 CLAIM REWARD"), KeyboardButton("🎁 MY VOUCHERS")],
+        [KeyboardButton("🔥 REFER & EARN"), KeyboardButton("👤 MY PROFILE")],
+        [KeyboardButton("🏆 LEADERBOARD"), KeyboardButton("💬 HELP & SUPPORT")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 

@@ -295,26 +295,26 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip() if update.message and update.message.text else ""
 
     # Check for Reply Keyboard button triggers
-    if text in ("🏃 Claim Reward", "🏃 Claim Reward (20 Pts)"):
+    if text in ("🏃 Claim Reward", "🏃 Claim Reward (20 Pts)", "⚡ 🏃 CLAIM REWARD", "⚡ 🏃 CLAIM REWARD (20 Pts)"):
         await claim_callback(update, context)
         return True
-    elif text == "🎁 My Vouchers":
+    elif text in ("🎁 My Vouchers", "🎁 MY VOUCHERS"):
         from handlers.user_menu import show_vouchers
         await show_vouchers(update, context)
         return True
-    elif text == "👥 Refer & Earn":
+    elif text in ("👥 Refer & Earn", "🔥 REFER & EARN", "👥 REFER & EARN"):
         from handlers.user_menu import show_referrals
         await show_referrals(update, context)
         return True
-    elif text in ("👤 Profile", "👤 My Profile"):
+    elif text in ("👤 Profile", "👤 My Profile", "👤 MY PROFILE", "📊 MY PROFILE"):
         from handlers.user_menu import show_profile
         await show_profile(update, context)
         return True
-    elif text == "🏆 Leaderboard":
+    elif text in ("🏆 Leaderboard", "🏆 LEADERBOARD"):
         from handlers.user_menu import show_leaderboard
         await show_leaderboard(update, context)
         return True
-    elif text == "ℹ️ Help":
+    elif text in ("ℹ️ Help", "💬 Help", "💬 HELP & SUPPORT"):
         from handlers.user_menu import show_help
         await show_help(update, context)
         return True
