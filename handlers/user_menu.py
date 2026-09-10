@@ -56,13 +56,19 @@ async def _reply_or_edit(update: Update, text: str, reply_markup=None):
         elif update.message:
             await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     except Exception:
-        # Fallback to plain text if Telegram fails to parse entities
+        # Fallback to plain text WITHOUT markdown parsing to ensure it NEVER fails
+        clean_text = (
+            text.replace("*", "")
+                .replace("`", "")
+                .replace("_", "")
+                .replace("[", "")
+                .replace("]", "")
+        )
         try:
-            clean_text = text.replace("*", "").replace("`", "")
             if update.callback_query:
-                await update.callback_query.edit_message_text(clean_text, reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(clean_text, reply_markup=reply_markup, parse_mode=None)
             elif update.message:
-                await update.message.reply_text(clean_text, reply_markup=reply_markup)
+                await update.message.reply_text(clean_text, reply_markup=reply_markup, parse_mode=None)
         except Exception:
             pass
 

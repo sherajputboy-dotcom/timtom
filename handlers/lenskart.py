@@ -299,33 +299,37 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route text input based on state or persistent reply keyboard button."""
     text = update.message.text.strip() if update.message and update.message.text else ""
+    if not text:
+        return False
 
-    # Check for Reply Keyboard button triggers FIRST (clears any active action state)
-    if text in ("🏃 Claim Reward", "🏃 Claim Reward (20 Pts)", "⚡ 🏃 CLAIM REWARD", "⚡ 🏃 CLAIM REWARD (20 Pts)"):
+    clean = text.lower()
+
+    # Flexible keyword matching for Reply Keyboard buttons FIRST (clears any active action state)
+    if any(k in clean for k in ("claim", "run")):
         context.user_data["action"] = None
         await claim_callback(update, context)
         return True
-    elif text in ("🎁 My Vouchers", "🎁 MY VOUCHERS"):
+    elif any(k in clean for k in ("voucher", "vault")):
         context.user_data["action"] = None
         from handlers.user_menu import show_vouchers
         await show_vouchers(update, context)
         return True
-    elif text in ("👥 Refer & Earn", "🔥 REFER & EARN", "👥 REFER & EARN"):
+    elif any(k in clean for k in ("refer", "earn", "ref")):
         context.user_data["action"] = None
         from handlers.user_menu import show_referrals
         await show_referrals(update, context)
         return True
-    elif text in ("👤 Profile", "👤 My Profile", "👤 MY PROFILE", "📊 MY PROFILE"):
+    elif any(k in clean for k in ("profile", "balance", "point", "my profile")):
         context.user_data["action"] = None
         from handlers.user_menu import show_profile
         await show_profile(update, context)
         return True
-    elif text in ("🏆 Leaderboard", "🏆 LEADERBOARD"):
+    elif any(k in clean for k in ("leaderboard", "top")):
         context.user_data["action"] = None
         from handlers.user_menu import show_leaderboard
         await show_leaderboard(update, context)
         return True
-    elif text in ("ℹ️ Help", "💬 Help", "💬 HELP & SUPPORT"):
+    elif any(k in clean for k in ("help", "support", "info")):
         context.user_data["action"] = None
         from handlers.user_menu import show_help
         await show_help(update, context)
