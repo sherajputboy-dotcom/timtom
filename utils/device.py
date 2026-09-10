@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lenskart Fake Device - Spoofs Android device for API calls"""
+"""Lenskart Fake Device - Spoofs Android device for API calls (Enhanced Multi-Header & Fallback Support)"""
 
 import random
 import time
@@ -52,7 +52,6 @@ class LenskartDevice:
         p = self.phone
         if p.startswith('+'):
             p = p[1:]  # strip +
-        # Strip known country codes
         code = self.phone_code.replace('+', '')
         if p.startswith(code):
             p = p[len(code):]
@@ -70,7 +69,7 @@ class LenskartDevice:
         return assertion[:100]
 
     def _headers(self, extra: dict = None) -> dict:
-        """Build request headers with device fingerprint."""
+        """Build request headers with device fingerprint & multi-auth support."""
         h = {
             "Content-Type": "application/json; charset=UTF-8",
             "api_key": "valyoo123",
@@ -97,6 +96,8 @@ class LenskartDevice:
             h["x-customer-phone-code"] = self.phone_code.replace("+", "")
         if self.session_token:
             h["x-session-token"] = self.session_token
+            h["authorization"] = f"Bearer {self.session_token}"
+            h["Authorization"] = f"Bearer {self.session_token}"
         if self.x_assertion:
             h["x-assertion"] = self.x_assertion
         if extra:
@@ -139,9 +140,11 @@ class LenskartDevice:
         """Initialize API session."""
         r = self._post("/v2/sessions", {})
         if r and r.status_code == 200:
-            self.session_token = r.json().get("result", {}).get("id")
+            data = r.json()
+            res = data.get("result") or data.get("data") or {}
+            self.session_token = res.get("id") or res.get("sessionToken") or res.get("token")
             return bool(self.session_token)
-        self.last_error = f"Session failed: {r.status_code if r else 'no response'}"
+        self.last_error = f"Session failed ({r.status_code if r else 'No response'})"
         return False
 
     def send_otp(self) -> dict:
@@ -149,15 +152,13 @@ class LenskartDevice:
         if not self.session_token:
             self.last_error = "No session token"
             return None
-        # API expects bare phone (no country code prefix) + separate phoneCode
         body = {"phoneCode": self.phone_code, "telephone": self._bare_phone}
         r = self._post("/v3/customers/sendOtp", body)
         if r and r.status_code == 200:
             data = r.json()
-            res = data.get("result") or {}
+            res = data.get("result") or data.get("data") or {}
             self.customer_type = "NEW" if res.get("isNewUser") else "EXISTING"
             return res
-        # Store error for debugging
         if r:
             try:
                 self.last_error = f"{r.status_code}: {r.json()}"
@@ -168,16 +169,23 @@ class LenskartDevice:
         return None
 
     def verify_otp(self, code: str) -> dict:
-        """Verify OTP and authenticate."""
+        """Verify OTP and authenticate session."""
         body = {"code": code, "phoneCode": self.phone_code, "telephone": self._bare_phone}
         r = self._post("/v2/customers/authenticate/mobile", body)
         if r and r.status_code == 200:
-            res = r.json().get("result") or {}
-            self.auth_token = res.get("token")
-            self.user_id = res.get("user_id")
-            if self.auth_token:
-                self.session_token = self.auth_token
-                return res
+            data = r.json()
+            res = data.get("result") or data.get("data") or {}
+            token = res.get("token") or res.get("id") or res.get("sessionToken") or res.get("accessToken")
+            if token:
+                self.auth_token = token
+                self.session_token = token
+            self.user_id = res.get("user_id") or res.get("id")
+            return res
+        if r:
+            try:
+                self.last_error = f"{r.status_code}: {r.json()}"
+            except Exception:
+                self.last_error = f"{r.status_code}: {r.text[:200]}"
         return None
 
     def get_me(self) -> dict:
@@ -185,7 +193,8 @@ class LenskartDevice:
         r = self._get("/v2/customers/me")
         if r and r.status_code == 200:
             data = r.json()
-            self.user_id = data.get("result", {}).get("id")
+            res = data.get("result") or data.get("data") or {}
+            self.user_id = res.get("id") or res.get("user_id")
             return data
         return None
 
@@ -206,24 +215,58 @@ class LenskartDevice:
         return payload
 
     def claim_reward(self, steps: int = None, campaign: str = None) -> dict:
-        """Submit fake steps and claim reward."""
+        """Submit fake steps and claim reward with fallback voucher lookup."""
         body = self._build_steps_payload(steps)
         params = {"campaignName": campaign or DEFAULT_CAMPAIGN}
         r = self._post("/v2/customers/bff/campaign/eligibility", body, params)
+        
         if r and r.status_code == 200:
-            res = r.json().get("result") or {}
-            if res.get("giftVoucher"):
-                return res
+            data = r.json()
+            res = data.get("result") or data.get("data") or data
+            if isinstance(res, dict):
+                code = (
+                    res.get("giftVoucher") or
+                    res.get("voucherCode") or
+                    res.get("code") or
+                    res.get("couponCode") or
+                    (res.get("result") if isinstance(res.get("result"), dict) else {}).get("giftVoucher")
+                )
+                if code:
+                    res["giftVoucher"] = code
+                    return res
+
+        # Fallback check: check user's vouchers directly from API
+        vouchers = self.check_vouchers(campaign)
+        if vouchers:
+            if isinstance(vouchers, list) and len(vouchers) > 0:
+                first = vouchers[0]
+                if isinstance(first, dict):
+                    code = first.get("giftVoucher") or first.get("voucherCode") or first.get("code")
+                    if code:
+                        first["giftVoucher"] = code
+                        return first
+            elif isinstance(vouchers, dict):
+                code = vouchers.get("giftVoucher") or vouchers.get("voucherCode") or vouchers.get("code")
+                if code:
+                    vouchers["giftVoucher"] = code
+                    return vouchers
+
+        if r:
+            try:
+                self.last_error = f"{r.status_code}: {r.json()}"
+            except Exception:
+                self.last_error = f"{r.status_code}: {r.text[:200]}"
         return None
 
     def check_vouchers(self, campaign: str = None) -> dict:
-        """Check existing vouchers."""
+        """Check existing vouchers for logged in account."""
         r = self._get("/v2/customers/me/giftVoucher", params={"campaignName": campaign or DEFAULT_CAMPAIGN})
         if r and r.status_code == 200:
-            return r.json()
+            data = r.json()
+            return data.get("result") or data.get("data") or data
         return None
 
     @property
     def device_info(self) -> str:
         """Human-readable device string."""
-        return f"{self.brand} {self.model} (Android {self.android_version})"
+        return f"{self.brand.title()} {self.model} (Android {self.android_version})"

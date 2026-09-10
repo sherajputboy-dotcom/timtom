@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lenskart reward claiming handlers — OTP flow, reward claim, voucher check & points deduction"""
+"""Lenskart reward claiming handlers — OTP flow, reward claim, voucher check & points deduction (Enhanced UX/UI)"""
 
 import asyncio
 from datetime import datetime
@@ -28,7 +28,7 @@ async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if claims are enabled
     claims_enabled = await db.get_setting("claims_enabled", "1")
     if claims_enabled == "0":
-        msg = "❌ *Claims are currently disabled.*\n\nPlease try again later."
+        msg = "❌ *Claims are currently disabled by Admin.*\n\nPlease check back later!"
         if is_callback:
             await update.callback_query.edit_message_text(msg, reply_markup=back_button("main_menu"), parse_mode="Markdown")
         else:
@@ -40,7 +40,7 @@ async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if points < CLAIM_COST_POINTS:
         msg = (
             f"❌ *INSUFFICIENT POINTS!*\n\n"
-            f"💰 *Your Balance:* `{points} Points`\n"
+            f"💳 *Your Balance:* `{points} Points`\n"
             f"🏃 *Required for Claim:* `{CLAIM_COST_POINTS} Points`\n\n"
             f"🔥 *Earn Points:* Share your referral link with friends to get *+50 Points* per referral!"
         )
@@ -56,7 +56,8 @@ async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["action"] = "waiting_phone"
     msg_text = (
-        f"🏃 *CLAIM LENSKART VOUCHER*\n\n"
+        f"⚡ 🏃 *CLAIM LENSKART REWARD* 🏃 ⚡\n"
+        f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
         f"💳 *Cost:* `{CLAIM_COST_POINTS} Points` (Balance: `{points} Points`)\n\n"
         f"📱 *Enter your 10-digit mobile number:*\n\n"
         f"Examples:\n"
@@ -97,24 +98,36 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return True
 
     context.user_data["action"] = None
-    await update.message.reply_text("⏳ *Initializing device fingerprint & requesting OTP...*", parse_mode="Markdown")
+    status_msg = await update.message.reply_text(
+        "⏳ *Step 1/3: Initializing Android Device Fingerprint...*",
+        parse_mode="Markdown"
+    )
 
     try:
         device = LenskartDevice(phone)
 
         if not device.create_session():
             err = device.last_error or "Session initialization failed"
-            await update.message.reply_text(
-                f"❌ Failed to create session for `{phone}`\n`{err}`",
+            await status_msg.edit_text(
+                f"❌ *Failed to Create Session*\n\n"
+                f"📱 Phone: `{phone}`\n"
+                f"⚠️ Error: `{err}`",
                 parse_mode="Markdown"
             )
             return True
 
+        await status_msg.edit_text(
+            "⏳ *Step 2/3: Requesting OTP from Lenskart API...*",
+            parse_mode="Markdown"
+        )
+
         otp_res = device.send_otp()
         if not otp_res:
             err = device.last_error or "OTP request failed"
-            await update.message.reply_text(
-                f"❌ Failed to send OTP to `{phone}`\n`{err}`",
+            await status_msg.edit_text(
+                f"❌ *Failed to Send OTP*\n\n"
+                f"📱 Phone: `{phone}`\n"
+                f"⚠️ Error: `{err}`",
                 parse_mode="Markdown"
             )
             return True
@@ -123,12 +136,13 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["action"] = "waiting_otp"
         context.user_data["pending_phone"] = phone
 
-        await update.message.reply_text(
-            f"✅ *OTP SENT SUCCESSFULLY!*\n\n"
-            f"📱 Phone: `{phone}`\n"
-            f"📱 Device Spoof: `{device.device_info}`\n\n"
+        await status_msg.edit_text(
+            f"✅ *OTP SENT SUCCESSFULLY!* 📱\n"
+            f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+            f"📱 *Phone:* `{phone}`\n"
+            f"📱 *Device Spoofed:* `{device.device_info}`\n\n"
             f"📝 *Enter the 4 or 6-digit OTP code received on your phone:*\n"
-            f"❌ Send /cancel to cancel.",
+            f"❌ Send /cancel to exit.",
             parse_mode="Markdown"
         )
     except Exception as e:
@@ -161,23 +175,41 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     device = pending_otps.get(key)
 
     if not device:
-        await update.message.reply_text("❌ Session expired! Please start again.")
+        await update.message.reply_text("❌ Session expired! Please start again from the menu.")
         context.user_data["action"] = None
         return True
 
-    await update.message.reply_text("⏳ *Authenticating OTP & injecting 30,000 steps...*", parse_mode="Markdown")
+    status_msg = await update.message.reply_text(
+        "⏳ *Step 1/2: Authenticating OTP Session...*",
+        parse_mode="Markdown"
+    )
 
     verify_res = device.verify_otp(otp_code)
     if not verify_res:
-        await update.message.reply_text("❌ Invalid OTP! Check the code and try again or send /cancel.")
+        err = device.last_error or "Invalid or expired OTP code"
+        await status_msg.edit_text(
+            f"❌ *OTP Verification Failed*\n\n"
+            f"📱 Phone: `{phone}`\n"
+            f"⚠️ Reason: `{err}`\n\n"
+            f"Please check the code and try again, or send /cancel.",
+            parse_mode="Markdown"
+        )
         return True
 
-    await update.message.reply_text("⏳ *Claiming gift voucher...*", parse_mode="Markdown")
+    await status_msg.edit_text(
+        "⏳ *Step 2/2: Injecting 30,000 Steps & Claiming Gift Voucher...*",
+        parse_mode="Markdown"
+    )
+
     device.get_me()
 
     db = context.bot_data["db"]
     steps = int(await db.get_setting("claim_steps", str(DEFAULT_STEPS)))
     reward = device.claim_reward(steps=steps)
+
+    # Double-check vouchers if primary eligibility call did not return voucher code
+    if not reward or not (reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")):
+        reward = device.check_vouchers()
 
     if reward and (reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")):
         voucher_code = reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")
@@ -232,7 +264,7 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{CREDIT_FOOTER}"
         )
 
-        await update.message.reply_text(
+        await status_msg.edit_text(
             text, reply_markup=claim_result_keyboard(), parse_mode="Markdown"
         )
     else:
@@ -247,7 +279,7 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Lenskart daily campaign stock limit reached\n\n"
             f"{CREDIT_FOOTER}"
         )
-        await update.message.reply_text(
+        await status_msg.edit_text(
             text, reply_markup=claim_result_keyboard(), parse_mode="Markdown"
         )
 
