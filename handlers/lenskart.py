@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lenskart reward claiming handlers — OTP flow, reward claim, voucher check & points deduction (Enhanced UX/UI)"""
+"""Lenskart reward claiming handlers — OTP flow, reward claim, voucher check & points deduction (Enhanced UX/UI & State Safety)"""
 
 import asyncio
 from datetime import datetime
@@ -7,7 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from middleware.force_join import require_join
 from utils.device import LenskartDevice
-from utils.keyboard import main_menu_keyboard, back_button, claim_result_keyboard
+from utils.keyboard import main_reply_keyboard, main_menu_keyboard, back_button, claim_result_keyboard
 from config import DEFAULT_STEPS, CLAIM_COST_POINTS, CREDIT_FOOTER
 
 # In-memory pending OTP store
@@ -19,6 +19,9 @@ async def claim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle 🏃 Claim Reward button with Points check."""
     db = context.bot_data["db"]
     user = update.effective_user
+
+    # Clear any previous pending states
+    context.user_data["action"] = None
 
     # Handle both callback query and text message (reply keyboard)
     is_callback = update.callback_query is not None
@@ -80,10 +83,12 @@ async def handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     phone = update.message.text.strip()
 
     if phone.startswith("/"):
-        if phone == "/cancel":
-            context.user_data["action"] = None
-            await update.message.reply_text("❌ Cancelled.", reply_markup=main_menu_keyboard())
-        return True
+        context.user_data["action"] = None
+        context.user_data["pending_phone"] = None
+        if phone in ("/cancel", "cancel"):
+            await update.message.reply_text("❌ Action cancelled.", reply_markup=main_reply_keyboard())
+            return True
+        return False  # Pass control to standard command handlers (/start, /admin, /profile, etc.)
 
     if not phone.startswith("+"):
         if phone.startswith("0"):
@@ -160,11 +165,12 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     otp_code = update.message.text.strip()
 
     if otp_code.startswith("/"):
-        if otp_code == "/cancel":
-            context.user_data["action"] = None
-            context.user_data["pending_phone"] = None
-            await update.message.reply_text("❌ Cancelled.", reply_markup=main_menu_keyboard())
-        return True
+        context.user_data["action"] = None
+        context.user_data["pending_phone"] = None
+        if otp_code in ("/cancel", "cancel"):
+            await update.message.reply_text("❌ Action cancelled.", reply_markup=main_reply_keyboard())
+            return True
+        return False  # Pass control to standard command handlers (/start, /admin, /profile, etc.)
 
     if not otp_code.isdigit() or len(otp_code) not in (4, 6):
         await update.message.reply_text("❌ Invalid OTP! Enter a 4 or 6-digit code.")
@@ -175,7 +181,7 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     device = pending_otps.get(key)
 
     if not device:
-        await update.message.reply_text("❌ Session expired! Please start again from the menu.")
+        await update.message.reply_text("❌ Session expired! Please start again from the menu.", reply_markup=main_reply_keyboard())
         context.user_data["action"] = None
         return True
 
@@ -294,31 +300,38 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route text input based on state or persistent reply keyboard button."""
     text = update.message.text.strip() if update.message and update.message.text else ""
 
-    # Check for Reply Keyboard button triggers
+    # Check for Reply Keyboard button triggers FIRST (clears any active action state)
     if text in ("🏃 Claim Reward", "🏃 Claim Reward (20 Pts)", "⚡ 🏃 CLAIM REWARD", "⚡ 🏃 CLAIM REWARD (20 Pts)"):
+        context.user_data["action"] = None
         await claim_callback(update, context)
         return True
     elif text in ("🎁 My Vouchers", "🎁 MY VOUCHERS"):
+        context.user_data["action"] = None
         from handlers.user_menu import show_vouchers
         await show_vouchers(update, context)
         return True
     elif text in ("👥 Refer & Earn", "🔥 REFER & EARN", "👥 REFER & EARN"):
+        context.user_data["action"] = None
         from handlers.user_menu import show_referrals
         await show_referrals(update, context)
         return True
     elif text in ("👤 Profile", "👤 My Profile", "👤 MY PROFILE", "📊 MY PROFILE"):
+        context.user_data["action"] = None
         from handlers.user_menu import show_profile
         await show_profile(update, context)
         return True
     elif text in ("🏆 Leaderboard", "🏆 LEADERBOARD"):
+        context.user_data["action"] = None
         from handlers.user_menu import show_leaderboard
         await show_leaderboard(update, context)
         return True
     elif text in ("ℹ️ Help", "💬 Help", "💬 HELP & SUPPORT"):
+        context.user_data["action"] = None
         from handlers.user_menu import show_help
         await show_help(update, context)
         return True
 
+    # If state is waiting_phone or waiting_otp, process input
     if await handle_phone_input(update, context):
         return True
     if await handle_otp_input(update, context):

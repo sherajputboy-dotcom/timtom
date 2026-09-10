@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Start handler — registration, referral tracking, points bonus, persistent reply keyboard"""
+"""Start handler — registration, referral tracking, points bonus, persistent reply keyboard (State Safe)"""
 
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS, REFERRAL_PREFIX, DEFAULT_WELCOME_MSG, CREDIT_FOOTER, REFERRAL_BONUS_POINTS
 from middleware.force_join import is_user_channel_member
-from utils.keyboard import main_reply_keyboard, refresh_dashboard_keyboard, force_join_keyboard
+from utils.keyboard import main_reply_keyboard, force_join_keyboard
+from utils.helpers import escape_md
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with optional referral deep link."""
     user = update.effective_user
     db = context.bot_data["db"]
+
+    # Reset any active action state
+    context.user_data["action"] = None
+    context.user_data["admin_action"] = None
+    context.user_data["pending_phone"] = None
 
     # Parse referral code from deep link
     referrer_id = None
@@ -40,11 +46,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             ref_count = await db.get_referral_count(referrer_id)
             ref_points = await db.get_user_points(referrer_id)
+            safe_name = escape_md(user.first_name or "Someone")
             await context.bot.send_message(
                 chat_id=referrer_id,
                 text=(
                     f"🎉 *New Referral Joined!*\n\n"
-                    f"👤 *{user.first_name or 'Someone'}* registered using your referral link!\n"
+                    f"👤 *{safe_name}* registered using your referral link!\n"
                     f"💰 Bonus Awarded: *+{REFERRAL_BONUS_POINTS} Points*\n"
                     f"📊 Total Referrals: `{ref_count}`\n"
                     f"💳 Your New Balance: `{ref_points} Points`"
@@ -69,10 +76,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not_joined:
             welcome = await db.get_setting("welcome_msg") or DEFAULT_WELCOME_MSG
             bot_me = await context.bot.get_me()
-            welcome = welcome.format(bot_name=bot_me.first_name)
+            if "{bot_name}" in welcome:
+                welcome = welcome.replace("{bot_name}", escape_md(bot_me.first_name))
 
             markup = force_join_keyboard(channels, joined_ids)
-            await update.message.reply_text(welcome, reply_markup=markup, parse_mode="Markdown")
+            try:
+                await update.message.reply_text(welcome, reply_markup=markup, parse_mode="Markdown")
+            except Exception:
+                clean_welcome = welcome.replace("*", "").replace("`", "")
+                await update.message.reply_text(clean_welcome, reply_markup=markup)
             return
 
     # All channels joined
@@ -86,19 +98,27 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, is
     db = context.bot_data["db"]
 
     greeting = "🎉 Welcome to Lenskart Reward Bot" if is_new else "👋 Welcome back"
-    name = user.first_name or "User"
+    safe_name = escape_md(user.first_name or "User")
     points = await db.get_user_points(user.id)
 
-    # Clean single message attaching reply keyboard and sleek refresh button
     text = (
-        f"{greeting}, *{name}*! 🕶️\n\n"
+        f"{greeting}, *{safe_name}*! 🕶️\n\n"
         f"💳 *Points Balance:* `{points} Points`\n"
         f"🏃 *Cost Per Claim:* `20 Points`\n\n"
         f"Use the bottom menu buttons to navigate!\n\n"
         f"{CREDIT_FOOTER}"
     )
-    await update.message.reply_text(
-        text,
-        reply_markup=main_reply_keyboard(),
-        parse_mode="Markdown"
-    )
+    try:
+        await update.message.reply_text(
+            text,
+            reply_markup=main_reply_keyboard(),
+            parse_mode="Markdown"
+        )
+    except Exception:
+        await update.message.reply_text(
+            f"{greeting}, {user.first_name or 'User'}!\n\n"
+            f"Points Balance: {points} Points\n"
+            f"Cost Per Claim: 20 Points\n\n"
+            f"Use the bottom menu buttons to navigate!",
+            reply_markup=main_reply_keyboard()
+        )
