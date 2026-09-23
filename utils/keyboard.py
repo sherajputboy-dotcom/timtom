@@ -18,14 +18,11 @@ class StyledInlineKeyboardButton(BaseInlineKeyboardButton):
     """
 
     def __init__(self, text: str, style: str = None, **kwargs):
+        if style:
+            api_kwargs = kwargs.pop("api_kwargs", None) or {}
+            api_kwargs["style"] = style
+            kwargs["api_kwargs"] = api_kwargs
         super().__init__(text=text, **kwargs)
-        self.style = style
-
-    def to_dict(self) -> dict:
-        d = super().to_dict()
-        if self.style:
-            d["style"] = self.style
-        return d
 
 
 class StyledKeyboardButton(BaseKeyboardButton):
@@ -37,14 +34,11 @@ class StyledKeyboardButton(BaseKeyboardButton):
     """
 
     def __init__(self, text: str, style: str = None, **kwargs):
+        if style:
+            api_kwargs = kwargs.pop("api_kwargs", None) or {}
+            api_kwargs["style"] = style
+            kwargs["api_kwargs"] = api_kwargs
         super().__init__(text=text, **kwargs)
-        self.style = style
-
-    def to_dict(self) -> dict:
-        d = super().to_dict()
-        if self.style:
-            d["style"] = self.style
-        return d
 
 
 # Alias for seamless backwards compatibility across all keyboard functions
