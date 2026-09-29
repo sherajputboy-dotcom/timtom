@@ -215,7 +215,15 @@ async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Double-check vouchers if primary eligibility call did not return voucher code
     if not reward or not (reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")):
-        reward = device.check_vouchers()
+        vouchers = device.check_vouchers()
+        if vouchers:
+            code, tier, expiry = device._find_voucher_code(vouchers)
+            if code:
+                reward = {
+                    "giftVoucher": code,
+                    "tier": tier,
+                    "giftVoucherExpiryDate": expiry
+                }
 
     if reward and (reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")):
         voucher_code = reward.get("giftVoucher") or reward.get("voucherCode") or reward.get("code")

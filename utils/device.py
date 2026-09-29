@@ -199,71 +199,132 @@ class LenskartDevice:
         return None
 
     def _build_steps_payload(self, steps: int = None) -> list:
-        """Build fake step count payload for 7 days."""
-        steps = steps or DEFAULT_STEPS
+        """Build realistic fake step count payload for 7 days ending on today."""
+        target_steps = steps or DEFAULT_STEPS
         DAY_MS = 86400000
-        ist_offset_ms = int(5.5 * 3600 * 1000)
-        now_utc_ms = int(time.time() * 1000)
-        now_ist_ms = now_utc_ms + ist_offset_ms
-        today_midnight_ist = (now_ist_ms // DAY_MS) * DAY_MS
-        today_midnight_utc = today_midnight_ist - ist_offset_ms
-        step_counts = [0, 0, 0, 0, 0, 0, steps]
+        now_ms = int(time.time() * 1000)
         payload = []
+        
+        # Build 7 days: i=6 (6 days ago) to i=0 (today)
         for i in range(6, -1, -1):
-            ts = today_midnight_utc - i * DAY_MS
-            payload.append({"distance": 0.0, "steps": step_counts[i], "timestamp": int(ts)})
+            ts = now_ms - (i * DAY_MS)
+            if i == 0:
+                day_steps = target_steps
+            else:
+                day_steps = random.randint(25000, target_steps)
+            distance = round(day_steps * 0.00075, 2)
+            payload.append({
+                "distance": distance,
+                "steps": day_steps,
+                "timestamp": int(ts)
+            })
         return payload
+
+    def _find_voucher_code(self, obj):
+        """Recursively search for voucher code, tier, and expiry date in API response."""
+        if not obj:
+            return None, None, None
+        if isinstance(obj, dict):
+            code = (
+                obj.get("giftVoucher") or
+                obj.get("voucherCode") or
+                obj.get("gift_voucher") or
+                obj.get("code") or
+                obj.get("couponCode") or
+                (obj.get("voucher") if isinstance(obj.get("voucher"), str) else None)
+            )
+            if code and isinstance(code, str) and len(code) >= 4:
+                tier = obj.get("tier") or obj.get("voucherTier")
+                expiry = obj.get("giftVoucherExpiryDate") or obj.get("expiryDate") or obj.get("expiry_date")
+                return code, tier, expiry
+
+            for key in ("result", "data", "voucher", "giftVoucherDetails", "vouchers", "giftVouchers"):
+                if key in obj:
+                    c, t, e = self._find_voucher_code(obj[key])
+                    if c:
+                        return c, t or obj.get("tier"), e or obj.get("giftVoucherExpiryDate")
+        elif isinstance(obj, list):
+            for item in obj:
+                c, t, e = self._find_voucher_code(item)
+                if c:
+                    return c, t, e
+        return None, None, None
 
     def claim_reward(self, steps: int = None, campaign: str = None) -> dict:
         """Submit fake steps and claim reward with fallback voucher lookup."""
         body = self._build_steps_payload(steps)
-        params = {"campaignName": campaign or DEFAULT_CAMPAIGN}
+        camp = campaign or DEFAULT_CAMPAIGN
+        params = {"campaignName": camp}
+        
+        # Try primary v2 eligibility endpoint
         r = self._post("/v2/customers/bff/campaign/eligibility", body, params)
         
         if r and r.status_code == 200:
-            data = r.json()
+            try:
+                data = r.json()
+            except Exception:
+                data = {}
+            logger.info(f"Eligibility response: {data}")
+            
+            code, tier, expiry = self._find_voucher_code(data)
+            if code:
+                return {
+                    "giftVoucher": code,
+                    "tier": tier,
+                    "giftVoucherExpiryDate": expiry
+                }
+
+            # Check for API message if no voucher in response
             res = data.get("result") or data.get("data") or data
             if isinstance(res, dict):
-                code = (
-                    res.get("giftVoucher") or
-                    res.get("voucherCode") or
-                    res.get("code") or
-                    res.get("couponCode") or
-                    (res.get("result") if isinstance(res.get("result"), dict) else {}).get("giftVoucher")
-                )
-                if code:
-                    res["giftVoucher"] = code
-                    return res
-
-        # Fallback check: check user's vouchers directly from API
-        vouchers = self.check_vouchers(campaign)
-        if vouchers:
-            if isinstance(vouchers, list) and len(vouchers) > 0:
-                first = vouchers[0]
-                if isinstance(first, dict):
-                    code = first.get("giftVoucher") or first.get("voucherCode") or first.get("code")
-                    if code:
-                        first["giftVoucher"] = code
-                        return first
-            elif isinstance(vouchers, dict):
-                code = vouchers.get("giftVoucher") or vouchers.get("voucherCode") or vouchers.get("code")
-                if code:
-                    vouchers["giftVoucher"] = code
-                    return vouchers
-
-        if r:
+                msg = res.get("message") or res.get("reason") or res.get("status") or data.get("message")
+                if msg:
+                    self.last_error = str(msg)
+                else:
+                    self.last_error = f"API Status: {data}"
+            elif isinstance(data, dict) and data.get("message"):
+                self.last_error = str(data["message"])
+        elif r:
             try:
-                self.last_error = f"{r.status_code}: {r.json()}"
+                err_data = r.json()
+                msg = err_data.get("message") or err_data.get("error") or err_data.get("result", {}).get("message")
+                self.last_error = str(msg) if msg else f"{r.status_code}: {err_data}"
             except Exception:
                 self.last_error = f"{r.status_code}: {r.text[:200]}"
+        else:
+            self.last_error = "No response from Lenskart API"
+
+        # Fallback check: check user's vouchers directly from API endpoints
+        vouchers = self.check_vouchers(camp)
+        if vouchers:
+            code, tier, expiry = self._find_voucher_code(vouchers)
+            if code:
+                return {
+                    "giftVoucher": code,
+                    "tier": tier,
+                    "giftVoucherExpiryDate": expiry
+                }
+
         return None
 
-    def check_vouchers(self, campaign: str = None) -> dict:
-        """Check existing vouchers for logged in account."""
-        r = self._get("/v2/customers/me/giftVoucher", params={"campaignName": campaign or DEFAULT_CAMPAIGN})
-        if r and r.status_code == 200:
-            data = r.json()
-            return data.get("result") or data.get("data") or data
+    def check_vouchers(self, campaign: str = None) -> list:
+        """Check existing vouchers for logged in account across endpoints."""
+        camp = campaign or DEFAULT_CAMPAIGN
+        endpoints = [
+            f"/v2/customers/me/giftVoucher?campaignName={camp}",
+            "/v2/customers/me/giftVoucher",
+            "/v1/customers/me/giftVoucher"
+        ]
+        for ep in endpoints:
+            r = self._get(ep)
+            if r and r.status_code == 200:
+                try:
+                    data = r.json()
+                    res = data.get("result") or data.get("data") or data
+                    if res:
+                        return res
+                except Exception:
+                    pass
         return None
 
     @property
